@@ -43,12 +43,20 @@ impl LanguageServer for Backend {
                     commands: vec!["custom.notification".to_string()],
                     work_done_progress_options: Default::default(),
                 }),
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
                 ..ServerCapabilities::default()
             },
            ..Default::default()
         })
     }
+
+    async fn initialized(&self, _: InitializedParams) {
+        self.client.log_message(MessageType::INFO, "Initialized!").await;
+    }
+
+
     async fn shutdown(&self) -> Result<()> {
+        self.client.log_message(MessageType::INFO, "Shutting Down.  Cya next time!").await;
         Ok(())
     }
 
@@ -68,13 +76,20 @@ impl LanguageServer for Backend {
             Err(Error::invalid_request())
         }
     }
+
+    async fn hover(&self, _params: HoverParams) -> Result<Option<Hover>> {
+        let output = Hover {
+            contents: HoverContents::Scalar(MarkedString::from_markdown("Hover Text".to_string())),
+            range: None
+        };
+        Ok(Some(output))
+    }
 }
 
 
 #[tokio::main]
 async fn main() {
     println!("Hello, world!");
-    //tracing_subscriber::fmt().init();
 
     let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
     let (service, socket) = LspService::new(|client| Backend { client });
