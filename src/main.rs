@@ -5,6 +5,8 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tower_lsp::lsp_types::*;
 use tower_lsp::lsp_types::notification::Notification;
 
+mod client;
+
 #[derive(Debug, Deserialize, Serialize)]
 struct CustomNotificationParams {
     title: String,
