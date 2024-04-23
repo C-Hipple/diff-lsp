@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tower_lsp::jsonrpc::{Error, Result};
-use tower_lsp::{Client, LanguageServer, LspService, Server};
+use tower_lsp::{Client, LanguageServer};//, LspService, Server};
 use tower_lsp::lsp_types::*;
 use tower_lsp::lsp_types::notification::Notification;
 
@@ -93,9 +93,20 @@ impl LanguageServer for Backend {
 async fn main() {
     println!("Hello, world!");
 
-    let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
-    let (service, socket) = LspService::new(|client| Backend { client });
-    println!("Socket is: {socket:?}");
+    //let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
+    //let (service, socket) = LspService::new(|client| Backend { client });
+    //println!("Socket is: {socket:?}");
+    let mut client = client::LspClient::new(
+        //"rust-analyzer".to_string()
+        "top".to_string()
+        //"pwd".to_string()
+    );
 
-    Server::new(stdin, stdout, socket).serve(service).await;
+    let output = client.send_request("hi".to_string());
+    println!("Output was: {output:?}");
+
+    println!("Goodbye world.")
+
+
+    //Server::new(stdin, stdout, socket).serve(service).await;
 }
