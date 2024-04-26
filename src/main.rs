@@ -98,11 +98,16 @@ async fn main() {
     //println!("Socket is: {socket:?}");
     let mut client = client::LspClient::new(
         //"rust-analyzer".to_string()
-        "top".to_string()
+        "gopls".to_string()
+        //"top".to_string()
         //"pwd".to_string()
     );
 
-    let output = client.send_request("hi".to_string());
+    let init_res = client.initialize().unwrap();
+    println!("init res was: {init_res:?}");
+
+
+    let output = client.send_raw_request("hi".to_string());
     println!("Output was: {output:?}");
 
     println!("Goodbye world.")
