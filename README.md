@@ -11,4 +11,4 @@ Acts as a server from your editor's point-of-view, and as a client to your "back
 
 ### Emacs
 
-See [diff-lsp.el](https:://www.github.com/C-Hipple/diff-lsp.el) for configuring & running with emacs.
+See [diff-lsp.el](https://www.github.com/C-Hipple/diff-lsp.el) for configuring & running with emacs.
