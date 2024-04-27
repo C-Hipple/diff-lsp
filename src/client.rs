@@ -1,16 +1,17 @@
 // Following
 
 use std::{
-    process::{Child, Stdio, Command},
+    process::{Child, Stdio, Command}, collections::HashMap,
     //thread::{spawn},
     //path::{PathBuf}, io::Read,
 };
 use std::path::PathBuf;
 use tower_lsp::lsp_types::*;
 use std::io::{Write, BufReader, BufRead};
+use anyhow::{anyhow, Result};
 
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use tower_lsp::jsonrpc::*;
 
@@ -88,21 +89,28 @@ impl LspClient {
 
     pub fn send_value_request<P: Serialize>(&mut self, val: P) -> Result<Value> {
         let std_in = self.process.stdin.as_mut().unwrap();
-        let binding = serde_json::to_string(&val).unwrap();
         // Also make the header
-        let msg = format!("Content-Length: {}\r\n\r\n{}", binding.len(), binding);
+        let full_body = json!({
+            "jsonrpc": "2.0".to_string(),
+            "id": 1,
+            "method": "initialize".to_string(), // TODO: Right method name?
+            "params": &val,
+        });
+        let full_binding = serde_json::to_string(&full_body).unwrap();
+        let msg = format!("Content-Length: {}\r\n\r\n{}", full_binding.len(), full_binding);
         println!("Sending the string: {msg:?}");
 
         let _ = std_in.write_all(msg.as_bytes());
         let _ = std_in.flush();
+
         println!("Sent the message!");
 
-        let std_err = self.process.stderr.as_mut().unwrap();
-        let stderr_reader = BufReader::new(std_err);
-        let stderr_lines = stderr_reader.lines();
+        let std_out = self.process.stdout.as_mut().unwrap();
+        let stdout_reader = BufReader::new(std_out);
+        let stdout_lines = stdout_reader.lines();
 
-        println!("Starting to read: ");
-        for line in stderr_lines {
+        println!("Starting to read: from std_out");
+        for line in stdout_lines {
             println!("Read: {:?}", line.unwrap());
         }
 
@@ -144,4 +152,51 @@ impl LspClient {
         // };
     //Err(_) => Err(Error::new(ErrorCode::ServerError(2)))
     }
+}
+
+pub enum LspHeader {
+    ContentType,
+    ContentLength(usize),
+}
+
+fn parse_header(s: &str) -> Result<LspHeader> {
+    let split: Vec<String> =
+        s.splitn(2, ": ").map(|s| s.trim().to_lowercase()).collect();
+    if split.len() != 2 {
+        return Err(anyhow!("Malformed"));
+    };
+    match split[0].as_ref() {
+        HEADER_CONTENT_TYPE => Ok(LspHeader::ContentType),
+        HEADER_CONTENT_LENGTH => {
+            Ok(LspHeader::ContentLength(split[1].parse::<usize>()?))
+        }
+        _ => Err(anyhow!("Unknown parse error occurred")),
+    }
+}
+
+pub fn read_message<T: BufRead>(reader: &mut T) -> Result<String> {
+    let mut buffer = String::new();
+    let mut content_length: Option<usize> = None;
+
+    loop {
+        buffer.clear();
+        let _ = reader.read_line(&mut buffer)?;
+        match &buffer {
+            s if s.trim().is_emptry() => break,
+            s => {
+                match parse_header(s)? {
+                    LspHeader::ContentLength(len) => content_length = Some(len),
+                    LspHeader::ContentType => (),
+                };
+            }
+        };
+    }
+
+    let content_length = content_length.ok_or_else(|| anyhow!("Missing content-length header: {}", buffer))?;
+
+    let mut body_buffer = vec![0: content_length];
+    reader.read_exact(&mut body_buffer)?;
+
+    let body = String::from_utf8(body_buffer)?;
+    Ok(body)
 }
