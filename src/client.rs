@@ -1,28 +1,31 @@
 // Following
 
+use anyhow::{anyhow, Result};
+use std::io::{BufRead, BufReader, Write};
+use std::path::PathBuf;
 use std::{
-    process::{Child, Stdio, Command}, collections::HashMap,
+    process::{Child, Command, Stdio},
     //thread::{spawn},
     //path::{PathBuf}, io::Read,
 };
-use std::path::PathBuf;
 use tower_lsp::lsp_types::*;
-use std::io::{Write, BufReader, BufRead};
-use anyhow::{anyhow, Result};
 
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use tower_lsp::jsonrpc::*;
+
+const HEADER_CONTENT_LENGTH: &str = "content-length";
+const HEADER_CONTENT_TYPE: &str = "content-type";
 
 pub struct LspClient {
     pub lsp_command: String,
     process: Child,
     #[allow(dead_code)]
-    path: Option<PathBuf>
+    path: Option<PathBuf>,
 }
 
-fn start_server(command: String) -> Result<Child>{
+fn start_server(command: String) -> Result<Child> {
     let mut process = Command::new(&command);
     let child = process
         .stdin(Stdio::piped())
@@ -32,7 +35,7 @@ fn start_server(command: String) -> Result<Child>{
 
     match child {
         Ok(c) => Ok(c),
-        Err(_) => Err(Error::new(ErrorCode::ServerError(1)))
+        Err(_) => Err(Error::new(ErrorCode::ServerError(1)).into()),
     }
 }
 
@@ -47,7 +50,7 @@ impl LspClient {
 
     #[allow(deprecated)] // root_path is deprecated but without it, code doesn't compile? :(
     pub fn initialize(&mut self) -> Result<InitializeResult> {
-        let params = InitializeParams{
+        let params = InitializeParams {
             process_id: None,
             root_path: None,
             root_uri: None,
@@ -71,23 +74,25 @@ impl LspClient {
         };
         let message = "initialize".to_string();
 
-        let resp: InitializeResult = serde_json::from_value(self.send_request(message, params).unwrap()).unwrap();
+        let raw_resp = self.send_request(message, params).unwrap();
+        let resp: InitializeResult = serde_json::from_value(raw_resp).unwrap();
         println!("We got the response: {resp:?}");
 
-        return Ok(resp)
+        return Ok(resp);
     }
 
     pub fn send_request<P: Serialize>(&mut self, message: String, params: P) -> Result<Value> {
         if message == "initialize".to_string() {
             let _ser_params = serde_json::to_value(params).unwrap();
-            self.send_value_request(_ser_params)
+            let raw_resp = self.send_value_request(_ser_params).unwrap();
+            let as_value: Value = serde_json::from_str(&raw_resp).unwrap();
+            Ok(as_value.get("result").unwrap().clone())
         } else {
-            Err(Error::new(ErrorCode::ServerError(4)))
+            Err(Error::new(ErrorCode::InternalError).into())
         }
-
     }
 
-    pub fn send_value_request<P: Serialize>(&mut self, val: P) -> Result<Value> {
+    pub fn send_value_request<P: Serialize>(&mut self, val: P) -> Result<String> {
         let std_in = self.process.stdin.as_mut().unwrap();
         // Also make the header
         let full_body = json!({
@@ -97,60 +102,21 @@ impl LspClient {
             "params": &val,
         });
         let full_binding = serde_json::to_string(&full_body).unwrap();
-        let msg = format!("Content-Length: {}\r\n\r\n{}", full_binding.len(), full_binding);
-        println!("Sending the string: {msg:?}");
+        let msg = format!(
+            "Content-Length: {}\r\n\r\n{}",
+            full_binding.len(),
+            full_binding
+        );
 
         let _ = std_in.write_all(msg.as_bytes());
         let _ = std_in.flush();
 
-        println!("Sent the message!");
 
         let std_out = self.process.stdout.as_mut().unwrap();
-        let stdout_reader = BufReader::new(std_out);
-        let stdout_lines = stdout_reader.lines();
+        let mut stdout_reader = BufReader::new(std_out);
+        let resp = read_message(&mut stdout_reader);
 
-        println!("Starting to read: from std_out");
-        for line in stdout_lines {
-            println!("Read: {:?}", line.unwrap());
-        }
-
-        Ok(
-            serde_json::Value::default()
-        )
-
-    }
-
-    //pub fn send_request<P: Serialize>(&mut self, message: String, _params: Option<P>) -> Result<String> {
-    pub fn send_raw_request(&mut self, message: String) -> Result<String> {
-        let mut std_in = match &self.process.stdin {
-            Some(thing) => thing,
-            None => return Err(Error::new(ErrorCode::ServerError(2)))
-        };
-
-        std_in.write(message.as_bytes()).unwrap();
-        println!("Sent the message!");
-
-        let std_out = self.process.stdout.as_mut().unwrap();
-        let stdout_reader = BufReader::new(std_out);
-        let stdout_lines = stdout_reader.lines();
-
-        println!("Starting to read");
-
-        for line in stdout_lines {
-            println!("Read: {:?}", line.unwrap());
-        }
-
-        Ok("Read!".to_string())
-
-        // match self.process.stdout {
-        //     Some(ref mut out) => {
-        //         let mut s = String::new();
-        //         out.read_to_string(&mut s);
-        //         return Ok(s)
-        //     }
-        //     None => return Err(Error::new(ErrorCode::ServerError(2)))
-        // };
-    //Err(_) => Err(Error::new(ErrorCode::ServerError(2)))
+        Ok(resp?)
     }
 }
 
@@ -160,16 +126,17 @@ pub enum LspHeader {
 }
 
 fn parse_header(s: &str) -> Result<LspHeader> {
-    let split: Vec<String> =
-        s.splitn(2, ": ").map(|s| s.trim().to_lowercase()).collect();
+    let split: Vec<String> = s.splitn(2, ": ").map(|s| s.trim().to_lowercase()).collect();
+
     if split.len() != 2 {
         return Err(anyhow!("Malformed"));
     };
-    match split[0].as_ref() {
+    println!("split as: {split:?}");
+
+    //match split[0].as_ref() {
+    match <std::string::String as AsRef<str>>::as_ref(&split[0]) {
         HEADER_CONTENT_TYPE => Ok(LspHeader::ContentType),
-        HEADER_CONTENT_LENGTH => {
-            Ok(LspHeader::ContentLength(split[1].parse::<usize>()?))
-        }
+        HEADER_CONTENT_LENGTH => Ok(LspHeader::ContentLength(split[1].parse::<usize>()?)),
         _ => Err(anyhow!("Unknown parse error occurred")),
     }
 }
@@ -182,8 +149,9 @@ pub fn read_message<T: BufRead>(reader: &mut T) -> Result<String> {
         buffer.clear();
         let _ = reader.read_line(&mut buffer)?;
         match &buffer {
-            s if s.trim().is_emptry() => break,
+            s if s.trim().is_empty() => break,
             s => {
+                println!("Found the string: {s:?}");
                 match parse_header(s)? {
                     LspHeader::ContentLength(len) => content_length = Some(len),
                     LspHeader::ContentType => (),
@@ -192,9 +160,10 @@ pub fn read_message<T: BufRead>(reader: &mut T) -> Result<String> {
         };
     }
 
-    let content_length = content_length.ok_or_else(|| anyhow!("Missing content-length header: {}", buffer))?;
+    let content_length =
+        content_length.ok_or_else(|| anyhow!("Missing content-length header: {}", buffer))?;
 
-    let mut body_buffer = vec![0: content_length];
+    let mut body_buffer = vec![0; content_length];
     reader.read_exact(&mut body_buffer)?;
 
     let body = String::from_utf8(body_buffer)?;

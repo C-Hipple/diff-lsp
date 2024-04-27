@@ -106,12 +106,6 @@ async fn main() {
     let init_res = client.initialize().unwrap();
     println!("init res was: {init_res:?}");
 
-
-    let output = client.send_raw_request("hi".to_string());
-    println!("Output was: {output:?}");
-
     println!("Goodbye world.")
-
-
     //Server::new(stdin, stdout, socket).serve(service).await;
 }
