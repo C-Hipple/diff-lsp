@@ -86,6 +86,19 @@ impl LanguageServer for Backend {
         };
         Ok(Some(output))
     }
+
+    async fn did_open(&self, _params: DidOpenTextDocumentParams) {
+        unimplemented!("Did Open not yet implemented")
+    }
+
+    async fn references(&self, _params: ReferenceParams) -> Result<Option<Vec<Location>>>{
+        unimplemented!("Getting references not yet implemented.")
+    }
+
+    async fn goto_definition(&self, _params: GotoDefinitionParams) -> Result<Option<GotoDefinitionResponse>> {
+        unimplemented!("goto_definition not yet implemented.")
+    }
+
 }
 
 
