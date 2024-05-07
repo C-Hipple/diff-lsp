@@ -1,22 +1,24 @@
 use regex::Regex;
+use std::collections::HashMap;
+
+use std::str::FromStr;
+use strum_macros::EnumString;
 
 #[allow(dead_code)]
 #[derive(Debug)]
 enum LineType {
-    Add,
-    Remove,
+    Added,
+    Removed,
     Unmodified,
 }
 
 impl LineType {
     fn from_line(line: String) -> Self {
-
         match line.chars().next() {
-            Some('+') => LineType::Add,
-            Some('-') => LineType::Remove,
+            Some('+') => LineType::Added,
+            Some('-') => LineType::Removed,
             _ => LineType::Unmodified,
         }
-
     }
 }
 
@@ -29,6 +31,7 @@ pub struct DiffLine {
 #[allow(dead_code)]
 #[derive(Default)]
 pub struct Hunk {
+    filename: String, // relative path, i.e. /src/client.rs
     start_old: u16,
     change_length_old: u16,
     start_new: u16, // consider s/new/modified
@@ -66,14 +69,66 @@ impl Hunk {
     }
 }
 
+#[derive(EnumString, Hash, PartialEq, std::cmp::Eq)]
+pub enum DiffHeader {
+    Project,
+    Root,
+    Buffer,
+    Type,
+    Head,
+    Merge,
+    Push,
+}
+
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct MagitDiff {
-    headers: Vec<String>,
+    headers: HashMap<DiffHeader, String>,
     hunks: Vec<Hunk>,
 }
 
-pub trait Parse<S> {
-    fn parse(source: &str) -> S;
+#[allow(dead_code)]
+impl MagitDiff {
+    fn parse(source: &str) -> Option<Self> {
+        let mut diff = MagitDiff::default();
+        let mut found_headers = false;
+        let mut current_filename = "";
+        let mut building_hunk = false;
+        for line in source.lines() {
+            if !found_headers {
+                let re = Regex::new(r"(\w+):\s+(.+)").unwrap();
+                if let Some(caps) = re.captures(line) {
+                    let cap = &caps[1];
+                    let header = DiffHeader::from_str(&caps[1]).unwrap();
+                    diff.headers.insert(
+                        header,
+                        caps[2].to_string()
+                    );
+                } else {
+                    found_headers = true;
+                }
+            } else { // found headers --into hunks
+                if line.starts_with("modified") {
+                    current_filename = line.split(" ").nth(1).unwrap();
+                }
+                let mut hunk_lines: Vec<&str> = vec![];
+                if line.starts_with("@@") && !building_hunk {
+                    hunk_lines.push(line);
+                }
+                if (line.starts_with("@@") && building_hunk) || line.starts_with("Recent commits") {
+                    let mut hunk = Hunk::parse(hunk_lines.join("\n").as_str()).unwrap();
+                    hunk.filename = current_filename.to_string();
+                    diff.hunks.push(hunk);
+                    hunk_lines = vec![];
+                    if line.starts_with("Recent commits") {
+                        break
+                    }
+                }
+            }
+
+        }
+        Some(diff)
+    }
 }
 
 #[cfg(test)]
@@ -110,5 +165,75 @@ mod tests {
         assert_eq!(parsed_hunk.change_length_old, 9);
         assert_eq!(parsed_hunk.change_length_new, 10);
         assert_eq!(parsed_hunk.changes.len(), 13)
+    }
+    #[test]
+    fn test_parse_magit_diff() {
+        let raw_diff = r#"Project: magit: diff-lsp
+Root: /Users/chrishipple/diff-lsp/
+Buffer: diff-lsp
+Type: magit-status
+Head:     main readme typo
+Merge:    origin/main readme typo
+Push:     origin/main readme typo
+
+Unstaged changes (1)
+modified   src/client.rs
+@@ -60,9 +60,10 @@ impl LspClient {
+                 text_document: {
+                     Some(TextDocumentClientCapabilities {
+                         hover: Some(HoverClientCapabilities::default()),
+-                        ..Default::default()
+-                    })
+-                },
++                        references: Some(ReferenceClientCapabilities{
++                            include_declaration: true
++                        }),
++                        ..Default::default()},
+                 window: None,
+                 general: None,
+                 experimental: None,
+@@ -72,17 +73,17 @@ impl LspClient {
+             client_info: None,
+             locale: None,
+         };
+-        let message = "initialize".to_string();
++        let message_type = "initialize".to_string();  // TODO: Is there an enum for this?
+
+-        let raw_resp = self.send_request(message, params).unwrap();
++        let raw_resp = self.send_request(message_type, params).unwrap();
+         let resp: InitializeResult = serde_json::from_value(raw_resp).unwrap();
+         println!("We got the response: {resp:?}");
+
+         return Ok(resp);
+     }
+
+-    pub fn send_request<P: Serialize>(&mut self, message: String, params: P) -> Result<Value> {
+-        if message == "initialize".to_string() {
++    pub fn send_request<P: Serialize>(&mut self, message_type: String, params: P) -> Result<Value> {
++        if message_type == "initialize".to_string() {
+             let _ser_params = serde_json::to_value(params).unwrap();
+             let raw_resp = self.send_value_request(_ser_params).unwrap();
+             let as_value: Value = serde_json::from_str(&raw_resp).unwrap();
+
+Recent commits
+97f1e20 origin/main readme typo
+f3b9f94 send message and serialize response (init message atleast)
+803d9f2 send message with full body, work on parse resposne
+6edde96 MVP--We can send the stdin message to server; working on format & reading response
+f3cad47 MVP of starting the server and reading the stdout
+d083654 more readme
+577afab Create rust.yml
+9ce2121 working on adding the client
+8ffb4ce Added hover support with static suggestion
+4d7867a following tutorial on tower-lsp
+
+"#;
+        let parsed_diff = MagitDiff::parse(&raw_diff).unwrap();
+        assert_eq!(parsed_diff.headers.get(&DiffHeader::Buffer), Some(&"diff-lsp".to_string()));
+        assert_eq!(parsed_diff.headers.get(&DiffHeader::Type), Some(&"magit-status".to_string()));
+        assert_eq!(parsed_diff.headers.get(&DiffHeader::Project), Some(&"magit: diff-lsp".to_string()));
+        let first_hunk = &parsed_diff.hunks[0];
+        assert_eq!(first_hunk.filename, "src/client.rs".to_string());
+        assert_eq!(parsed_diff.hunks.len(), 2)
     }
 }
