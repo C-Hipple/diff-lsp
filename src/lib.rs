@@ -5,7 +5,7 @@ use std::str::FromStr;
 use strum_macros::EnumString;
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum LineType {
     Added,
     Removed,
@@ -23,13 +23,14 @@ impl LineType {
 }
 
 #[allow(dead_code)]
+#[derive(Clone, Debug)]
 pub struct DiffLine {
     line_type: LineType,
     line: String,
 }
 
 #[allow(dead_code)]
-#[derive(Default)]
+#[derive(Default, Clone, Debug)]
 pub struct Hunk {
     filename: String, // relative path, i.e. /src/client.rs
     start_old: u16,
@@ -37,10 +38,13 @@ pub struct Hunk {
     start_new: u16, // consider s/new/modified
     change_length_new: u16,
     changes: Vec<DiffLine>,
+    diff_location: u16, // Where the raw hunk starts (the @@ line) in the plain text diff.
 }
 
 impl Hunk {
     pub fn parse(source: &str) -> Option<Hunk> {
+        // println!("Parsing the hunk from lines:");
+        // println!("{}", source);
         let mut found_header = false;
         let mut wip = Hunk::default();
         for line in source.lines() {
@@ -67,7 +71,16 @@ impl Hunk {
         //TODO: More other handling
         Some(wip)
     }
+
+    pub fn diff_length(&self) -> u16 {
+        self.changes.len() as u16
+    }
+
+    pub fn diff_end(&self) -> u16 {
+        self.diff_location + self.diff_length()
+    }
 }
+
 
 #[derive(EnumString, Hash, PartialEq, std::cmp::Eq)]
 pub enum DiffHeader {
@@ -94,40 +107,69 @@ impl MagitDiff {
         let mut found_headers = false;
         let mut current_filename = "";
         let mut building_hunk = false;
-        for line in source.lines() {
+        let mut hunk_lines: Vec<&str> = vec![];
+        let mut offset = 0;
+        for (i, line) in source.lines().enumerate() {
             if !found_headers {
                 let re = Regex::new(r"(\w+):\s+(.+)").unwrap();
                 if let Some(caps) = re.captures(line) {
-                    let cap = &caps[1];
                     let header = DiffHeader::from_str(&caps[1]).unwrap();
-                    diff.headers.insert(
-                        header,
-                        caps[2].to_string()
-                    );
+                    diff.headers.insert(header, caps[2].to_string());
                 } else {
                     found_headers = true;
                 }
-            } else { // found headers --into hunks
+            } else {
+                // found headers --into hunks
+                // TODO: Handle multiple files
                 if line.starts_with("modified") {
-                    current_filename = line.split(" ").nth(1).unwrap();
+                    current_filename = line.split_whitespace().nth(1).unwrap();
                 }
-                let mut hunk_lines: Vec<&str> = vec![];
                 if line.starts_with("@@") && !building_hunk {
+                    building_hunk = true;
                     hunk_lines.push(line);
+                    continue;
                 }
                 if (line.starts_with("@@") && building_hunk) || line.starts_with("Recent commits") {
+                    if line.starts_with("Recent commits") {
+                        // magit puts an empty line between the last diff and "Recent Commits"
+                        // and that's our only way to know that we're out of the hunk
+                        // since a hunk could have an empty line.
+                        offset = 1;
+                    } else {
+                        offset = 0;
+                    }
                     let mut hunk = Hunk::parse(hunk_lines.join("\n").as_str()).unwrap();
                     hunk.filename = current_filename.to_string();
+                    hunk.diff_location = (i - hunk.changes.len() - offset) as u16;
                     diff.hunks.push(hunk);
                     hunk_lines = vec![];
+                    if line.starts_with("@@") {
+                        hunk_lines.push(line);
+                    }
                     if line.starts_with("Recent commits") {
-                        break
+                        break;
                     }
                 }
-            }
 
+                if building_hunk {
+                    hunk_lines.push(line);
+                    continue;
+                }
+            }
         }
         Some(diff)
+    }
+
+    pub fn map_diff_line_to_src_number(&self, line_num: u16) -> Option<u16> {
+        // Translates a line number on the magit-diff to a line in the source
+        // the LSP client will always reference the "diff document" but our backend LSP servers need to know the
+        // line number in the original source file.
+        for hunk in &self.hunks {
+            if line_num > hunk.diff_location && line_num <= hunk.diff_end() {
+                return Some(line_num - hunk.diff_location)
+            }
+        }
+        None
     }
 }
 
@@ -164,8 +206,9 @@ mod tests {
         assert_eq!(parsed_hunk.start_new, 60);
         assert_eq!(parsed_hunk.change_length_old, 9);
         assert_eq!(parsed_hunk.change_length_new, 10);
-        assert_eq!(parsed_hunk.changes.len(), 13)
+        assert_eq!(parsed_hunk.changes.len(), 13);
     }
+
     #[test]
     fn test_parse_magit_diff() {
         let raw_diff = r#"Project: magit: diff-lsp
@@ -229,11 +272,42 @@ d083654 more readme
 
 "#;
         let parsed_diff = MagitDiff::parse(&raw_diff).unwrap();
-        assert_eq!(parsed_diff.headers.get(&DiffHeader::Buffer), Some(&"diff-lsp".to_string()));
-        assert_eq!(parsed_diff.headers.get(&DiffHeader::Type), Some(&"magit-status".to_string()));
-        assert_eq!(parsed_diff.headers.get(&DiffHeader::Project), Some(&"magit: diff-lsp".to_string()));
+        assert_eq!(
+            parsed_diff.headers.get(&DiffHeader::Buffer),
+            Some(&"diff-lsp".to_string())
+        );
+        assert_eq!(
+            parsed_diff.headers.get(&DiffHeader::Type),
+            Some(&"magit-status".to_string())
+        );
+        assert_eq!(
+            parsed_diff.headers.get(&DiffHeader::Project),
+            Some(&"magit: diff-lsp".to_string())
+        );
         let first_hunk = &parsed_diff.hunks[0];
         assert_eq!(first_hunk.filename, "src/client.rs".to_string());
-        assert_eq!(parsed_diff.hunks.len(), 2)
+        assert_eq!(parsed_diff.hunks.len(), 2);
+
+        let mut hunk_iter = parsed_diff.hunks.into_iter();
+        let top_hunk = hunk_iter.nth(0).unwrap();
+        let second_hunk = hunk_iter.nth(0).unwrap();
+
+        assert_eq!(top_hunk.filename, "src/client.rs".to_string());
+        assert_eq!(second_hunk.filename, "src/client.rs".to_string());
+
+        assert_eq!(top_hunk.start_old, 60);
+        assert_eq!(top_hunk.start_new, 60);
+        assert_eq!(top_hunk.change_length_old, 9);
+        assert_eq!(top_hunk.change_length_new, 10);
+        assert_eq!(top_hunk.changes.len(), 13);
+        assert_eq!(top_hunk.diff_location, 11);
+
+        assert_eq!(second_hunk.start_old, 72);
+        assert_eq!(second_hunk.start_new, 73);
+        assert_eq!(second_hunk.change_length_old, 17);
+        assert_eq!(second_hunk.change_length_new, 17);
+        assert_eq!(second_hunk.changes.len(), 21);
+        assert_eq!(second_hunk.diff_location, 25);
     }
+
 }
