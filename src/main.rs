@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tower_lsp::jsonrpc::{Error, Result};
-use tower_lsp::{Client, LanguageServer};//, LspService, Server};
+use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tower_lsp::lsp_types::*;
 use tower_lsp::lsp_types::notification::Notification;
 
@@ -31,12 +31,13 @@ impl Notification for CustomNotification {
 }
 
 #[derive(Debug)]
-struct Backend {
+struct DiffLsp {
     client: Client,
+    //my_cliet: client::LspClient,
 }
 
 #[tower_lsp::async_trait]
-impl LanguageServer for Backend {
+impl LanguageServer for DiffLsp {
     async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
         Ok(InitializeResult {
             server_info: None,
@@ -87,17 +88,18 @@ impl LanguageServer for Backend {
         Ok(Some(output))
     }
 
-    async fn did_open(&self, _params: DidOpenTextDocumentParams) {
-        unimplemented!("Did Open not yet implemented")
+    async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        println!("Opened document: {:?}", params);
+
     }
 
-    async fn references(&self, _params: ReferenceParams) -> Result<Option<Vec<Location>>>{
-        unimplemented!("Getting references not yet implemented.")
-    }
+    // async fn references(&self, _params: ReferenceParams) -> Result<Option<Vec<Location>>>{
+    //     unimplemented!("Getting references not yet implemented.")
+    // }
 
-    async fn goto_definition(&self, _params: GotoDefinitionParams) -> Result<Option<GotoDefinitionResponse>> {
-        unimplemented!("goto_definition not yet implemented.")
-    }
+    // async fn goto_definition(&self, _params: GotoDefinitionParams) -> Result<Option<GotoDefinitionResponse>> {
+    //     unimplemented!("goto_definition not yet implemented.")
+    // }
 
 }
 
@@ -106,9 +108,10 @@ impl LanguageServer for Backend {
 async fn main() {
     println!("Hello, world!");
 
-    //let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
-    //let (service, socket) = LspService::new(|client| Backend { client });
-    //println!("Socket is: {socket:?}");
+    let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
+    let (service, socket) = LspService::new(|client| DiffLsp { client });
+
+    println!("Socket is: {socket:?}");
     let mut client = client::LspClient::new(
         //"rust-analyzer".to_string()
         "gopls".to_string()
@@ -119,6 +122,6 @@ async fn main() {
     let init_res = client.initialize().unwrap();
     println!("init res was: {init_res:?}");
 
-    println!("Goodbye world.")
-    //Server::new(stdin, stdout, socket).serve(service).await;
+    println!("Goodbye world.");
+    Server::new(stdin, stdout, socket).serve(service).await;
 }

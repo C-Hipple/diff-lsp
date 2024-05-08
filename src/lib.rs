@@ -104,11 +104,13 @@ pub struct MagitDiff {
 impl MagitDiff {
     fn parse(source: &str) -> Option<Self> {
         let mut diff = MagitDiff::default();
+
         let mut found_headers = false;
         let mut current_filename = "";
         let mut building_hunk = false;
         let mut hunk_lines: Vec<&str> = vec![];
         let mut offset = 0;
+
         for (i, line) in source.lines().enumerate() {
             if !found_headers {
                 let re = Regex::new(r"(\w+):\s+(.+)").unwrap();
@@ -119,7 +121,7 @@ impl MagitDiff {
                     found_headers = true;
                 }
             } else {
-                // found headers --into hunks
+                // found headers, moving onto hunks
                 // TODO: Handle multiple files
                 if line.starts_with("modified") {
                     current_filename = line.split_whitespace().nth(1).unwrap();
@@ -135,8 +137,6 @@ impl MagitDiff {
                         // and that's our only way to know that we're out of the hunk
                         // since a hunk could have an empty line.
                         offset = 1;
-                    } else {
-                        offset = 0;
                     }
                     let mut hunk = Hunk::parse(hunk_lines.join("\n").as_str()).unwrap();
                     hunk.filename = current_filename.to_string();

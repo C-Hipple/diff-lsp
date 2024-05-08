@@ -18,6 +18,7 @@ use tower_lsp::jsonrpc::*;
 const HEADER_CONTENT_LENGTH: &str = "content-length";
 const HEADER_CONTENT_TYPE: &str = "content-type";
 
+#[derive(Debug)]
 pub struct LspClient {
     pub lsp_command: String,
     process: Child,
