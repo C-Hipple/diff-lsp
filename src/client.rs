@@ -78,20 +78,16 @@ impl LspClient {
 
         let raw_resp = self.send_request(message_type, params).unwrap();
         let resp: InitializeResult = serde_json::from_value(raw_resp).unwrap();
-        println!("We got the response: {resp:?}");
+        //println!("We got the response: {resp:?}");
 
         return Ok(resp);
     }
 
-    pub fn send_request<P: Serialize>(&mut self, message_type: String, params: P) -> Result<Value> {
-        if message_type == "initialize".to_string() {
-            let _ser_params = serde_json::to_value(params).unwrap();
-            let raw_resp = self.send_value_request(_ser_params).unwrap();
-            let as_value: Value = serde_json::from_str(&raw_resp).unwrap();
-            Ok(as_value.get("result").unwrap().clone())
-        } else {
-            Err(Error::new(ErrorCode::InternalError).into())
-        }
+    pub fn send_request<P: Serialize>(&mut self, _message_type: String, params: P) -> Result<Value> {
+        let _ser_params = serde_json::to_value(params).unwrap();
+        let raw_resp = self.send_value_request(_ser_params).unwrap();
+        let as_value: Value = serde_json::from_str(&raw_resp).unwrap();
+        Ok(as_value.get("result").unwrap().clone())
     }
 
     pub fn send_value_request<P: Serialize>(&mut self, val: P) -> Result<String> {
@@ -120,6 +116,16 @@ impl LspClient {
 
         Ok(resp?)
     }
+
+    pub fn did_open(&mut self, params: DidOpenTextDocumentParams) {
+        self.send_request("did_open".to_string(), params);
+    }
+
+    pub fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        let res = self.send_request("hover".to_string(), params).unwrap();
+        let hover_res: Hover = serde_json::from_value(res).unwrap();
+        Ok(Some(hover_res))
+    }
 }
 
 pub enum LspHeader {
@@ -133,7 +139,7 @@ fn parse_header(s: &str) -> Result<LspHeader> {
     if split.len() != 2 {
         return Err(anyhow!("Malformed"));
     };
-    println!("split as: {split:?}");
+    //println!("split as: {split:?}");
 
     //match split[0].as_ref() {
     match <std::string::String as AsRef<str>>::as_ref(&split[0]) {
@@ -153,7 +159,7 @@ pub fn read_message<T: BufRead>(reader: &mut T) -> Result<String> {
         match &buffer {
             s if s.trim().is_empty() => break,
             s => {
-                println!("Found the string: {s:?}");
+                //println!("Found the string: {s:?}");
                 match parse_header(s)? {
                     LspHeader::ContentLength(len) => content_length = Some(len),
                     LspHeader::ContentType => (),
