@@ -94,7 +94,7 @@ impl LanguageServer for DiffLsp {
         }
     }
 
-    async fn hover(self, params: HoverParams) -> Result<Option<Hover>> {
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         let output = Hover {
             contents: HoverContents::Scalar(MarkedString::from_markdown("Hover Text".to_string())),
             range: None,
