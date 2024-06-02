@@ -4,6 +4,24 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use strum_macros::EnumString;
 
+pub enum SupportedFileType {
+    Rust,
+    Go,
+    Python,
+}
+
+impl SupportedFileType {
+    pub fn from_extension(extension: String) -> Option<SupportedFileType> {
+        match extension.as_str() {
+            "rs" => Some(SupportedFileType::Rust),
+            "go" => Some(SupportedFileType::Go),
+            "py" => Some(SupportedFileType::Python),
+            _    => None
+        }
+    }
+
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 enum LineType {
@@ -15,6 +33,7 @@ enum LineType {
 impl LineType {
     fn from_line(line: String) -> Self {
         match line.chars().next() {
+            // Could technically be bugger if it's a diff and the first char is 1 of these and it's unmodified
             Some('+') => LineType::Added,
             Some('-') => LineType::Removed,
             _ => LineType::Unmodified,
@@ -28,6 +47,7 @@ pub struct DiffLine {
     line_type: LineType,
     line: String,
 }
+
 
 #[allow(dead_code)]
 #[derive(Default, Clone, Debug)]
@@ -81,7 +101,16 @@ impl Hunk {
     }
 
     pub fn file_type(&self) -> String {
+        // better not get any files with "." in them
+        self.filename.split_once('.').unwrap().1.to_string()
     }
+}
+
+pub struct SourceMap {
+    // Return type when you translate a
+    file_name: String,
+    source_line: u16,
+    file_type: SupportedFileType,
 }
 
 
@@ -163,37 +192,41 @@ impl MagitDiff {
         Some(diff)
     }
 
-    pub fn map_diff_line_to_src_number(&self, line_num: u16) -> Option<u16> {
-        // Translates a line number on the magit-diff to a line in the source
-        // the LSP client will always reference the "diff document" but our backend LSP servers need to know the
-        // line number in the original source file.
-        for hunk in &self.hunks {
-            if line_num > hunk.diff_location && line_num <= hunk.diff_end() {
-                return Some(line_num - hunk.diff_location)
+    pub fn map_diff_line_to_src(&self, line_num: u16)  -> Option<SourceMap> {
+        if let Some(hunk) = self.get_hunk_by_diff_line_number(line_num) {
+            if let Some(supported_file_type) = SupportedFileType::from_extension(hunk.file_type()) {
+                return Some(SourceMap{
+                    file_name: hunk.filename,
+                    source_line: line_num - hunk.diff_location + hunk.start_new,
+                    file_type: supported_file_type,
+                })
             }
         }
         None
     }
 
-    pub fn get_hunk_by_diff_line_number(&self, line_num: u16) -> Option<Hunk> {
+    // fn map_diff_line_to_src_number(&self, line_num: u16) -> Option<u16> {
+    //     // Translates a line number on the magit-diff to a line in the source
+    //     // the LSP client will always reference the "diff document" but our backend LSP servers need to know the
+    //     // line number in the original source file.
+    //     for hunk in &self.hunks {
+    //         if line_num > hunk.diff_location && line_num <= hunk.diff_end() {
+    //             return Some(line_num - hunk.diff_location)
+    //         }
+    //     }
+    //     None
+    // }
+
+    fn get_hunk_by_diff_line_number(&self, line_num: u16) -> Option<Hunk> {
         for hunk in &self.hunks {
             if line_num > hunk.diff_location && line_num <= hunk.diff_end() {
                 return Some(hunk)
             }
         }
         None
-
     }
 }
 
-pub fn map_extension_to_filetype(extension: &str) -> Option<&str> {
-    match extension {
-        "rs" => Some("rust"),
-        "go" => Some("go"),
-        "py" => Some("python"),
-        _    => None
-    }
-}
 
 #[cfg(test)]
 mod tests {
