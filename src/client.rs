@@ -19,7 +19,7 @@ const HEADER_CONTENT_LENGTH: &str = "content-length";
 const HEADER_CONTENT_TYPE: &str = "content-type";
 
 #[derive(Debug)]
-pub struct LspClient {
+pub struct BackendLspClient {
     pub lsp_command: String,
     process: Child,
     #[allow(dead_code)]
@@ -40,9 +40,9 @@ fn start_server(command: String) -> Result<Child> {
     }
 }
 
-impl LspClient {
+impl BackendLspClient {
     pub fn new(command: String) -> Self {
-        LspClient {
+        BackendLspClient {
             lsp_command: command.clone(),
             process: start_server(command.clone()).unwrap(),
             path: None,

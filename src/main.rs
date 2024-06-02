@@ -1,20 +1,20 @@
-use std::path::{PathBuf};
-use std::fs::{OpenOptions, remove_file};
+use std::fs::{remove_file, OpenOptions};
 use std::io::prelude::*;
+use std::path::PathBuf;
+use std::collections::HashMap;
 
-use log::{Log, Record, Level, Metadata, SetLoggerError, LevelFilter, info};
-use tower_lsp::{LspService, Server};
 use expanduser::expanduser;
+use log::{info, Level, LevelFilter, Log, Metadata, Record, SetLoggerError};
+use tower_lsp::{LspService, Server};
 
-mod server;
 mod client;
+mod server;
 
 fn logfile_path() -> PathBuf {
     expanduser("~/.diff-lsp.log").unwrap()
 }
 
 struct FileLogger;
-
 
 impl Log for FileLogger {
     fn enabled(&self, metadata: &Metadata) -> bool {
@@ -43,26 +43,28 @@ impl Log for FileLogger {
 static LOGGER: FileLogger = FileLogger;
 
 pub fn init() -> Result<(), SetLoggerError> {
-    log::set_logger(&LOGGER)
-        .map(|()| log::set_max_level(LevelFilter::Info))
+    log::set_logger(&LOGGER).map(|()| log::set_max_level(LevelFilter::Info))
 }
 
 #[tokio::main]
 async fn main() {
     println!("Hello, world!");
 
+    let mut rust_analyzer = client::BackendLspClient::new("rust-analyzer".to_string());
+    let mut gopls = client::BackendLspClient::new("gopls".to_string());
+
+    let mut backends: HashMap<String, client::BackendLspClient> = HashMap::new();
+    backends.insert("rust".to_string(), rust_analyzer);
+    backends.insert("go".to_string(), gopls);
+
     let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
-    let (service, socket) = LspService::new(|client| server::DiffLsp::new( client));
 
-    println!("Socket is: {socket:?}");
-    let mut client = client::LspClient::new(
-        "rust-analyzer".to_string()
-        //"gopls".to_string()
-        //"top".to_string()
-        //"pwd".to_string()
-    );
+    // Set up our middleware lsp
+    let (service, socket) = LspService::new(|client| server::DiffLsp::new(client, backends));
 
-    client.initialize().unwrap();
+    // Testing to make sure we can properly interface with teh backends
+    let mut rust_analyzer2 = client::BackendLspClient::new("rust-analyzer".to_string());
+    rust_analyzer2.initialize().unwrap();
     //println!("init res was: {init_res:?}");
     info!("Starting Logger");
 

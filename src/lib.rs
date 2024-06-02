@@ -79,10 +79,13 @@ impl Hunk {
     pub fn diff_end(&self) -> u16 {
         self.diff_location + self.diff_length()
     }
+
+    pub fn file_type(&self) -> String {
+    }
 }
 
 
-#[derive(EnumString, Hash, PartialEq, std::cmp::Eq)]
+#[derive(EnumString, Hash, PartialEq, std::cmp::Eq, Debug)]
 pub enum DiffHeader {
     Project,
     Root,
@@ -94,7 +97,7 @@ pub enum DiffHeader {
 }
 
 #[allow(dead_code)]
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct MagitDiff {
     headers: HashMap<DiffHeader, String>,
     hunks: Vec<Hunk>,
@@ -170,6 +173,25 @@ impl MagitDiff {
             }
         }
         None
+    }
+
+    pub fn get_hunk_by_diff_line_number(&self, line_num: u16) -> Option<Hunk> {
+        for hunk in &self.hunks {
+            if line_num > hunk.diff_location && line_num <= hunk.diff_end() {
+                return Some(hunk)
+            }
+        }
+        None
+
+    }
+}
+
+pub fn map_extension_to_filetype(extension: &str) -> Option<&str> {
+    match extension {
+        "rs" => Some("rust"),
+        "go" => Some("go"),
+        "py" => Some("python"),
+        _    => None
     }
 }
 
