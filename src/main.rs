@@ -3,6 +3,7 @@ use std::io::prelude::*;
 use std::path::PathBuf;
 use std::collections::HashMap;
 
+use diff_lsp::SupportedFileType;
 use expanduser::expanduser;
 use log::{info, Level, LevelFilter, Log, Metadata, Record, SetLoggerError};
 use tower_lsp::{LspService, Server};
@@ -50,12 +51,17 @@ pub fn init() -> Result<(), SetLoggerError> {
 async fn main() {
     println!("Hello, world!");
 
-    let mut rust_analyzer = client::BackendLspClient::new("rust-analyzer".to_string());
-    let mut gopls = client::BackendLspClient::new("gopls".to_string());
+    // TODO only start the ones we actually need
+    let rust_analyzer = client::ClientForBackendServer::new("rust-analyzer".to_string());
+    let gopls = client::ClientForBackendServer::new("gopls".to_string());
+    // MAYBE global pylsp :/ ?
+    let pylsp = client::ClientForBackendServer::new("pylsp".to_string());
 
-    let mut backends: HashMap<String, client::BackendLspClient> = HashMap::new();
-    backends.insert("rust".to_string(), rust_analyzer);
-    backends.insert("go".to_string(), gopls);
+    let mut backends: HashMap<diff_lsp::SupportedFileType, client::ClientForBackendServer> = HashMap::new();
+
+    backends.insert(SupportedFileType::Rust, rust_analyzer);
+    backends.insert(SupportedFileType::Go, gopls);
+    backends.insert(SupportedFileType::Python, pylsp);
 
     let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
 
@@ -63,7 +69,7 @@ async fn main() {
     let (service, socket) = LspService::new(|client| server::DiffLsp::new(client, backends));
 
     // Testing to make sure we can properly interface with teh backends
-    let mut rust_analyzer2 = client::BackendLspClient::new("rust-analyzer".to_string());
+    let mut rust_analyzer2 = client::ClientForBackendServer::new("rust-analyzer".to_string());
     rust_analyzer2.initialize().unwrap();
     //println!("init res was: {init_res:?}");
     info!("Starting Logger");

@@ -4,11 +4,14 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use strum_macros::EnumString;
 
+#[derive(Debug, Hash, PartialEq, std::cmp::Eq)]
 pub enum SupportedFileType {
     Rust,
     Go,
     Python,
 }
+
+// TODO this feels clunky
 
 impl SupportedFileType {
     pub fn from_extension(extension: String) -> Option<SupportedFileType> {
@@ -20,6 +23,14 @@ impl SupportedFileType {
         }
     }
 
+}
+
+pub fn get_lsp_for_file_type(file_type: SupportedFileType) -> Option<String> {
+    match file_type {
+        SupportedFileType::Rust => Some("rust-analyzer".to_string()),
+        SupportedFileType::Go => Some("gopls".to_string()),
+        SupportedFileType::Python => Some("pylsp".to_string()),
+    }
 }
 
 #[allow(dead_code)]
@@ -108,9 +119,9 @@ impl Hunk {
 
 pub struct SourceMap {
     // Return type when you translate a
-    file_name: String,
-    source_line: u16,
-    file_type: SupportedFileType,
+    pub file_name: String,
+    pub source_line: u16,
+    pub file_type: SupportedFileType,
 }
 
 
@@ -220,7 +231,7 @@ impl MagitDiff {
     fn get_hunk_by_diff_line_number(&self, line_num: u16) -> Option<Hunk> {
         for hunk in &self.hunks {
             if line_num > hunk.diff_location && line_num <= hunk.diff_end() {
-                return Some(hunk)
+                return Some(hunk.clone())  // is this going to shoot me in the foot?
             }
         }
         None

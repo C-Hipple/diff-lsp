@@ -34,36 +34,29 @@ impl Notification for CustomNotification {
 #[derive(Debug)]
 pub struct DiffLsp {
     pub client: Client,
-    pub backends: HashMap<String, client::BackendLspClient>,
+    pub backends: HashMap<diff_lsp::SupportedFileType, client::ClientForBackendServer>,
     //pub diff:   // Implements the mapping functions too?
     pub diff: Option<diff_lsp::MagitDiff>,
 }
 
 impl DiffLsp {
-    pub fn new(client: Client, backends: HashMap<String, client::BackendLspClient>) -> Self {
-        DiffLsp { client, backends }
+    pub fn new(client: Client, backends: HashMap<diff_lsp::SupportedFileType, client::ClientForBackendServer>) -> Self {
+        DiffLsp { client, backends, diff: None }
     }
 
-    fn get_backend(&self, line_num: u16) -> Option<client::BackendLspClient> {
-        match self.diff {
-            Some(diff) => {
-                diff.get_hunk_by_diff_line_number(line_num).unwrap().fi
-
-
-                let file_type = "".to_string();
-                self.backends.get(file_type),
-            }
-            None => return None
+    fn get_backend(&self, line_num: u16) -> Option<&client::ClientForBackendServer> {
+        if let Some(source_map) = self.diff.unwrap().map_diff_line_to_src(line_num) {
+            let backend = self.backends.get(&source_map.file_type);
+            backend
+        } else {
+            None
         }
     }
 
-    async fn map_to_source_line(line_in_diff: usize) -> Option<(String, usize)> {
-        // Returns which file the hovered hunk corresponds to (relative path) the the line in the modified version
-        // Returns None if you're hovering over something not in the hunk, such as the filename
-
-        // TODO Implemenet
-        return ("main.rs".to_string(), 45)
+    fn set_diff(&mut self, diff: diff_lsp::MagitDiff) {
+        self.diff = Some(diff)
     }
+
 }
 
 #[tower_lsp::async_trait]
@@ -120,10 +113,9 @@ impl LanguageServer for DiffLsp {
             contents: HoverContents::Scalar(MarkedString::from_markdown("Hover Text".to_string())),
             range: None,
        };
-
-        let line: usize = 0;
-
-        self.get_backend(line).hover(params);
+        let line: u16 = params.text_document_position_params.position.line.try_into().unwrap();
+        self.get_backend(line).unwrap()
+            .hover(params);
         Ok(Some(output))
     }
 
