@@ -44,8 +44,9 @@ impl DiffLsp {
         DiffLsp { client, backends, diff: None }
     }
 
+    #[allow(dead_code)]
     fn get_backend(&self, line_num: u16) -> Option<&client::ClientForBackendServer> {
-        if let Some(source_map) = self.diff.unwrap().map_diff_line_to_src(line_num) {
+        if let Some(source_map) = self.diff.as_ref().unwrap().map_diff_line_to_src(line_num) {
             let backend = self.backends.get(&source_map.file_type);
             backend
         } else {
@@ -53,6 +54,7 @@ impl DiffLsp {
         }
     }
 
+    #[allow(dead_code)]
     fn set_diff(&mut self, diff: diff_lsp::MagitDiff) {
         self.diff = Some(diff)
     }
@@ -114,8 +116,8 @@ impl LanguageServer for DiffLsp {
             range: None,
        };
         let line: u16 = params.text_document_position_params.position.line.try_into().unwrap();
-        self.get_backend(line).unwrap()
-            .hover(params);
+        // self.get_backend(line).unwrap()
+        //     .hover(params);
         Ok(Some(output))
     }
 
@@ -123,9 +125,9 @@ impl LanguageServer for DiffLsp {
         println!("Opened document: {:?}", params);
         let _real_path = params.text_document.uri.path();
 
-        for (_, value) in self.backends.iter() {
-            value.did_open(params);
-        }
+        // for (_, value) in self.backends.iter_mut() {
+        //     value.did_open(&params);
+        // }
     }
 
 

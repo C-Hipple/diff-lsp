@@ -117,11 +117,11 @@ impl ClientForBackendServer {
         Ok(resp?)
     }
 
-    pub fn did_open(&mut self, params: DidOpenTextDocumentParams) {
+    pub fn did_open(&mut self, params: &DidOpenTextDocumentParams) {
         self.send_request("did_open".to_string(), params);
     }
 
-    pub fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+    pub fn hover(&mut self, params: HoverParams) -> Result<Option<Hover>> {
         let res = self.send_request("hover".to_string(), params).unwrap();
         let hover_res: Hover = serde_json::from_value(res).unwrap();
         Ok(Some(hover_res))
