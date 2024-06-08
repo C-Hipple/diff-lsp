@@ -6,6 +6,9 @@ use tower_lsp::lsp_types::notification::Notification;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
 use crate::client;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -34,18 +37,18 @@ impl Notification for CustomNotification {
 #[derive(Debug)]
 pub struct DiffLsp {
     pub client: Client,
-    pub backends: HashMap<diff_lsp::SupportedFileType, client::ClientForBackendServer>,
+    pub backends: HashMap<diff_lsp::SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>>,
     //pub diff:   // Implements the mapping functions too?
     pub diff: Option<diff_lsp::MagitDiff>,
 }
 
 impl DiffLsp {
-    pub fn new(client: Client, backends: HashMap<diff_lsp::SupportedFileType, client::ClientForBackendServer>) -> Self {
+    pub fn new(client: Client, backends: HashMap<diff_lsp::SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>>) -> Self {
         DiffLsp { client, backends, diff: None }
     }
 
     #[allow(dead_code)]
-    fn get_backend(&self, line_num: u16) -> Option<&client::ClientForBackendServer> {
+    fn get_backend(&self, line_num: u16) -> Option<&Arc<Mutex<client::ClientForBackendServer>>> {
         if let Some(source_map) = self.diff.as_ref().unwrap().map_diff_line_to_src(line_num) {
             let backend = self.backends.get(&source_map.file_type);
             backend
@@ -116,9 +119,13 @@ impl LanguageServer for DiffLsp {
             range: None,
        };
         let line: u16 = params.text_document_position_params.position.line.try_into().unwrap();
-        // self.get_backend(line).unwrap()
-        //     .hover(params);
-        Ok(Some(output))
+        let backend_mutex = self.get_backend(line).unwrap();
+        let mut backend = backend_mutex.lock().await;
+        let hov_res = backend.hover(params);
+        match hov_res {
+            Ok(res) => Ok(res),
+            Err(e) => Err(e),
+        }
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {

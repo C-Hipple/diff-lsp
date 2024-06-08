@@ -2,6 +2,9 @@ use std::fs::{remove_file, OpenOptions};
 use std::io::prelude::*;
 use std::path::PathBuf;
 use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
 
 use diff_lsp::SupportedFileType;
 use expanduser::expanduser;
@@ -57,11 +60,11 @@ async fn main() {
     // MAYBE global pylsp :/ ?
     let pylsp = client::ClientForBackendServer::new("pylsp".to_string());
 
-    let mut backends: HashMap<diff_lsp::SupportedFileType, client::ClientForBackendServer> = HashMap::new();
+    let mut backends: HashMap<diff_lsp::SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>> = HashMap::new();
 
-    backends.insert(SupportedFileType::Rust, rust_analyzer);
-    backends.insert(SupportedFileType::Go, gopls);
-    backends.insert(SupportedFileType::Python, pylsp);
+    backends.insert(SupportedFileType::Rust, Arc::new(Mutex::new(rust_analyzer)));
+    backends.insert(SupportedFileType::Go, Arc::new(Mutex::new(gopls)));
+    backends.insert(SupportedFileType::Python, Arc::new(Mutex::new(pylsp)));
 
     let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
 
