@@ -1,9 +1,6 @@
 use std::fs::{remove_file, OpenOptions};
 use std::io::prelude::*;
 use std::path::PathBuf;
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
 
 use diff_lsp::SupportedFileType;
@@ -13,6 +10,7 @@ use tower_lsp::{LspService, Server};
 
 mod client;
 mod server;
+mod test_data;
 
 fn logfile_path() -> PathBuf {
     expanduser("~/.diff-lsp.log").unwrap()
@@ -55,20 +53,11 @@ async fn main() {
     println!("Hello, world!");
 
     // TODO only start the ones we actually need
-    let rust_analyzer = client::ClientForBackendServer::new("rust-analyzer".to_string());
-    let gopls = client::ClientForBackendServer::new("gopls".to_string());
-    // MAYBE global pylsp :/ ?
-    let pylsp = client::ClientForBackendServer::new("pylsp".to_string());
-
-    let mut backends: HashMap<diff_lsp::SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>> = HashMap::new();
-
-    backends.insert(SupportedFileType::Rust, Arc::new(Mutex::new(rust_analyzer)));
-    backends.insert(SupportedFileType::Go, Arc::new(Mutex::new(gopls)));
-    backends.insert(SupportedFileType::Python, Arc::new(Mutex::new(pylsp)));
 
     let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
 
     // Set up our middleware lsp
+    let backends = server::get_backends_map();
     let (service, socket) = LspService::new(|client| server::DiffLsp::new(client, backends));
 
     // Testing to make sure we can properly interface with teh backends

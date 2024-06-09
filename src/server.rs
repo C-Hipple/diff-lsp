@@ -1,15 +1,19 @@
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::HashMap;
-use tower_lsp::jsonrpc::{Error, Result};
+use std::fs;
+use serde::{Deserialize, Serialize};
+
+use serde_json::Value;
+use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
 use tower_lsp::lsp_types::notification::Notification;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
+use expanduser::expanduser;
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::client;
+use crate::SupportedFileType;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct CustomNotificationParams {
@@ -34,17 +38,43 @@ impl Notification for CustomNotification {
     const METHOD: &'static str = "custom/notification";
 }
 
+pub fn get_backends_map() -> HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>> {
+    let rust_analyzer = client::ClientForBackendServer::new("rust-analyzer".to_string());
+    let gopls = client::ClientForBackendServer::new("gopls".to_string());
+    // MAYBE global pylsp :/ ?
+    let pylsp = client::ClientForBackendServer::new("pylsp".to_string());
+
+    let mut backends: HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>> = HashMap::new();
+
+    backends.insert(SupportedFileType::Rust, Arc::new(Mutex::new(rust_analyzer)));
+    backends.insert(SupportedFileType::Go, Arc::new(Mutex::new(gopls)));
+    backends.insert(SupportedFileType::Python, Arc::new(Mutex::new(pylsp)));
+    backends
+}
+
 #[derive(Debug)]
 pub struct DiffLsp {
     pub client: Client,
-    pub backends: HashMap<diff_lsp::SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>>,
+    pub backends: HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>>,
     //pub diff:   // Implements the mapping functions too?
     pub diff: Option<diff_lsp::MagitDiff>,
 }
 
 impl DiffLsp {
-    pub fn new(client: Client, backends: HashMap<diff_lsp::SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>>) -> Self {
-        DiffLsp { client, backends, diff: None }
+    pub fn new(
+        client: Client,
+        backends: HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>>,
+    ) -> Self {
+        // TODO Actually set diff during textDocument/didOpen
+
+        let contents = fs::read_to_string(expanduser("~/test7.diff-test").unwrap()).unwrap();
+        let diff = diff_lsp::MagitDiff::parse(&contents);
+
+        DiffLsp {
+            client,
+            backends,
+            diff,
+        }
     }
 
     #[allow(dead_code)]
@@ -61,7 +91,6 @@ impl DiffLsp {
     fn set_diff(&mut self, diff: diff_lsp::MagitDiff) {
         self.diff = Some(diff)
     }
-
 }
 
 #[tower_lsp::async_trait]
@@ -114,17 +143,22 @@ impl LanguageServer for DiffLsp {
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
-        let output = Hover {
-            contents: HoverContents::Scalar(MarkedString::from_markdown("Hover Text".to_string())),
-            range: None,
-       };
-        let line: u16 = params.text_document_position_params.position.line.try_into().unwrap();
+        //  let output = Hover {
+        //      contents: HoverContents::Scalar(MarkedString::from_markdown("Hover Text".to_string())),
+        //      range: None,
+        // };
+        let line: u16 = params
+            .text_document_position_params
+            .position
+            .line
+            .try_into()
+            .unwrap();
         let backend_mutex = self.get_backend(line).unwrap();
         let mut backend = backend_mutex.lock().await;
         let hov_res = backend.hover(params);
         match hov_res {
             Ok(res) => Ok(res),
-            Err(e) => Err(e),
+            Err(_) => Err(Error::new(ErrorCode::ServerError(1))),  // Translating Error type
         }
     }
 
@@ -137,8 +171,6 @@ impl LanguageServer for DiffLsp {
         // }
     }
 
-
-
     // async fn references(&self, _params: ReferenceParams) -> Result<Option<Vec<Location>>>{
     //     unimplemented!("Getting references not yet implemented.")
     // }
@@ -146,4 +178,15 @@ impl LanguageServer for DiffLsp {
     // async fn goto_definition(&self, _params: GotoDefinitionParams) -> Result<Option<GotoDefinitionResponse>> {
     //     unimplemented!("goto_definition not yet implemented.")
     // }
+}
+
+#[cfg(test)]
+mod tests {
+    use diff_lsp::MagitDiff;
+    use crate::test_data;
+
+    #[test]
+    fn test_use_crate_test_data() {
+        let diff = MagitDiff::parse(test_data::RAW_MAGIT_DIFF);
+    }
 }

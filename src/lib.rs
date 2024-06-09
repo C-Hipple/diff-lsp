@@ -33,6 +33,7 @@ pub fn get_lsp_for_file_type(file_type: SupportedFileType) -> Option<String> {
     }
 }
 
+
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 enum LineType {
@@ -145,7 +146,7 @@ pub struct MagitDiff {
 
 #[allow(dead_code)]
 impl MagitDiff {
-    fn parse(source: &str) -> Option<Self> {
+    pub fn parse(source: &str) -> Option<Self> {
         let mut diff = MagitDiff::default();
 
         let mut found_headers = false;
@@ -376,4 +377,6 @@ d083654 more readme
         assert_eq!(second_hunk.diff_location, 25);
     }
 
+
 }
+
