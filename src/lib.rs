@@ -140,8 +140,8 @@ pub enum DiffHeader {
 #[allow(dead_code)]
 #[derive(Default, Debug)]
 pub struct MagitDiff {
-    headers: HashMap<DiffHeader, String>,
-    hunks: Vec<Hunk>,
+    pub headers: HashMap<DiffHeader, String>,
+    pub hunks: Vec<Hunk>,
 }
 
 #[allow(dead_code)]
@@ -379,4 +379,3 @@ d083654 more readme
 
 
 }
-

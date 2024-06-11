@@ -58,7 +58,7 @@ async fn main() {
 
     // Set up our middleware lsp
     let backends = server::get_backends_map();
-    let (service, socket) = LspService::new(|client| server::DiffLsp::new(client, backends));
+    let (service, socket) = LspService::new(|client| server::DiffLsp::new(client, backends, None));
 
     // Testing to make sure we can properly interface with teh backends
     let mut rust_analyzer2 = client::ClientForBackendServer::new("rust-analyzer".to_string());
