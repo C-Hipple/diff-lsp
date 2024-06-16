@@ -90,3 +90,7 @@ pub fn get_init_params() -> tower_lsp::lsp_types::InitializeParams {
         locale: None,
     }
 }
+
+pub fn get_open_params(uri: Url) -> tower_lsp::lsp_types::DidOpenTextDocumentParams {
+    DidOpenTextDocumentParams { text_document: TextDocumentItem { uri: (uri), language_id: "rust".to_string(), version: 1, text: RAW_MAGIT_DIFF.to_string() } }
+}

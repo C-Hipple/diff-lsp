@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 
+use itertools::Itertools;
 use expanduser::expanduser;
 use serde_json::Value;
 use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
@@ -202,13 +203,21 @@ impl LanguageServer for DiffLsp {
             }
         }
 
-        for filename in files {
+        // not sure how to type hint the Vec<String> doing this in the loop constructor
+        let filtered_files: Vec<String> = files.into_iter().unique().collect();
+        for filename in filtered_files {
             let filetype = SupportedFileType::from_filename(filename.clone()).unwrap();
             if let Some(backend_mutex) = self.backends.get(&filetype) {
                 let mut backend = backend_mutex.lock().await;
                 let mut these_params = params.clone();
+                // Here we need to break the LSP contract and use the originator's didOpen URI to read the contents of the file.
+
+                let text = fs::read_to_string(filename.clone()).unwrap();
+
                 these_params.text_document.uri =
                     diff_lsp::uri_from_relative_filename(self.root.clone(), &filename);
+                these_params.text_document.text = text;
+                println!("Calling Did open to {:?} for file {:?}; with text: {:?}", backend.lsp_command, these_params.text_document.uri.path(), these_params.text_document.text);
                 backend.did_open(&these_params);
             }
         }
@@ -250,7 +259,7 @@ mod tests {
         let url = Url::from_file_path("/Users/chrishipple/test7.diff-test").unwrap();
         let hover_request = HoverParams {
             text_document_position_params: TextDocumentPositionParams {
-                text_document: (TextDocumentIdentifier { uri: url }),
+                text_document: (TextDocumentIdentifier { uri: url.clone() }),
                 position: Position {
                     line: 24,
                     character: 15,
@@ -262,6 +271,8 @@ mod tests {
         };
 
         let _init_res = service.inner().initialize(test_data::get_init_params()).await.unwrap();
+        let _open_res = service.inner().did_open(test_data::get_open_params(url)).await;
+
         let _hover_result = service.inner().hover(hover_request).await.unwrap().unwrap();
     }
 }

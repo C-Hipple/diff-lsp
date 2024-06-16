@@ -1,5 +1,3 @@
-// Following
-
 use anyhow::{anyhow, Result};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
@@ -76,22 +74,27 @@ impl ClientForBackendServer {
         };
         let method = "initialize".to_string();  // TODO: Is there an enum for this?
         println!("Sending initialize to backend {}", self.lsp_command);
-        let raw_resp = self.send_request(method, params).unwrap();
+        let raw_resp = self.request(method, params).unwrap();
         let resp: InitializeResult = serde_json::from_value(raw_resp).unwrap();
         //println!("We got the response: {resp:?}");
 
         return Ok(resp);
     }
 
-    pub fn send_request<P: Serialize>(&mut self, method: String, params: P) -> Result<Value> {
+    pub fn request<P: Serialize>(&mut self, method: String, params: P) -> Result<Value> {
         let ser_params = serde_json::to_value(params).unwrap();
         println!("{}", ser_params);
-        let raw_resp = self.send_value_request(ser_params, method).unwrap();
+        let raw_resp = self.send_value_request(ser_params, method, true).unwrap();
         let as_value: Value = serde_json::from_str(&raw_resp).unwrap();
         Ok(as_value.get("result").unwrap().clone())
     }
 
-    pub fn send_value_request<P: Serialize>(&mut self, val: P, method: String) -> Result<String> {
+    pub fn notify<P: Serialize>(&mut self, method: String, val: P) {
+        // Just like a request, but does not expect a response.
+        self.send_value_request(val, method, false).unwrap();
+    }
+
+    fn send_value_request<P: Serialize>(&mut self, val: P, method: String, check_response: bool) -> Result<String> {
         let std_in = self.process.stdin.as_mut().unwrap();
         // Also make the header
         let full_body = json!({
@@ -111,20 +114,24 @@ impl ClientForBackendServer {
         let _ = std_in.write_all(msg.as_bytes());
         let _ = std_in.flush();
 
+        if !check_response {
+            return Ok("".to_string())
+        }
 
         let std_out = self.process.stdout.as_mut().unwrap();
         let mut stdout_reader = BufReader::new(std_out);
+
         let resp = read_message(&mut stdout_reader);
 
         Ok(resp?)
     }
 
     pub fn did_open(&mut self, params: &DidOpenTextDocumentParams) {
-        self.send_request("did_open".to_string(), params).unwrap();
+        self.notify("textDocument/didOpen".to_string(), params);
     }
 
     pub fn hover(&mut self, params: HoverParams) -> Result<Option<Hover>> {
-        let res = self.send_request("hover".to_string(), params).unwrap();
+        let res = self.request("textDocument/hover".to_string(), params).unwrap();
         let hover_res: Hover = serde_json::from_value(res).unwrap();
         Ok(Some(hover_res))
     }
