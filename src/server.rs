@@ -180,9 +180,8 @@ impl LanguageServer for DiffLsp {
         let mut backend = backend_mutex.lock().await;
         println!("sending hover to backend: {}", backend.lsp_command);
         let mut mapped_params = params.clone();
-        mapped_params.text_document_position_params.text_document.uri = diff_lsp::uri_from_relative_filename(self.root, &source_map.file_name);
+        mapped_params.text_document_position_params.text_document.uri = diff_lsp::uri_from_relative_filename(self.root.clone(), &source_map.file_name);
         mapped_params.text_document_position_params.position.line = source_map.source_line.into();
-
         let hov_res = backend.hover(mapped_params);
         println!("hov_res: {:?}", hov_res);
         match hov_res {
@@ -254,7 +253,7 @@ mod tests {
                 text_document: (TextDocumentIdentifier { uri: url }),
                 position: Position {
                     line: 24,
-                    character: 7,
+                    character: 15,
                 },
             },
             work_done_progress_params: WorkDoneProgressParams {

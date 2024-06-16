@@ -40,7 +40,7 @@ pub fn get_lsp_for_file_type(file_type: SupportedFileType) -> Option<String> {
 
 pub fn uri_from_relative_filename(project_root: String, rel_filename: &str) -> Url {
     // since teh diff has a relative path like /src/lib.rs and not a full path.
-    Url::from_file_path(project_root + rel_filename).unwrap()
+    Url::from_file_path(project_root + "/" + rel_filename).unwrap()
 }
 
 #[allow(dead_code)]
