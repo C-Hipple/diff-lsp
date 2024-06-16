@@ -52,20 +52,18 @@ pub fn init() -> Result<(), SetLoggerError> {
 async fn main() {
     println!("Hello, world!");
 
-    // TODO only start the ones we actually need
-
     let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
 
-    // Set up our middleware lsp
     let backends = server::get_backends_map();
-    let (service, socket) = LspService::new(|client| server::DiffLsp::new(client, backends, None));
+    let root: String = expanduser("~/diff-lsp").unwrap().display().to_string();
+    let (diff_lsp_service, socket) = LspService::new(|client| server::DiffLsp::new(client, backends, None, root));
 
     // Testing to make sure we can properly interface with teh backends
-    let mut rust_analyzer2 = client::ClientForBackendServer::new("rust-analyzer".to_string());
-    rust_analyzer2.initialize().unwrap();
+    // let mut rust_analyzer2 = client::ClientForBackendServer::new("rust-analyzer".to_string());
+    // rust_analyzer2.initialize().unwrap();
     //println!("init res was: {init_res:?}");
     info!("Starting Logger");
 
     println!("Goodbye world.");
-    Server::new(stdin, stdout, socket).serve(service).await;
+    Server::new(stdin, stdout, socket).serve(diff_lsp_service).await;
 }

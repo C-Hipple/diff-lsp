@@ -1,3 +1,4 @@
+use diff_lsp::SourceMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -8,7 +9,7 @@ use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
 use tower_lsp::lsp_types::notification::Notification;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
-use tower_lsp::{LspService, Server};
+use tower_lsp::{LspService};
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -61,6 +62,7 @@ pub struct DiffLsp {
     pub backends: HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>>,
     //pub diff:   // Implements the mapping functions too?
     pub diff: Option<diff_lsp::MagitDiff>,
+    pub root: String, // The project root, without a trailing slash.  ~/diff-lsp for example
 }
 
 impl DiffLsp {
@@ -68,6 +70,7 @@ impl DiffLsp {
         client: Client,
         backends: HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>>,
         diff: Option<diff_lsp::MagitDiff>,
+        root: String,
     ) -> Self {
         // Hacky that if diff is None, then we want to read our hardcoded file.
         if let Some(my_diff) = diff {
@@ -75,6 +78,7 @@ impl DiffLsp {
                 client,
                 backends,
                 diff: Some(my_diff),
+                root,
             };
         }
 
@@ -86,16 +90,16 @@ impl DiffLsp {
             client,
             backends,
             diff,
+            root,
         }
     }
 
-    fn get_backend(&self, line_num: u16) -> Option<&Arc<Mutex<client::ClientForBackendServer>>> {
-        if let Some(source_map) = self.diff.as_ref().unwrap().map_diff_line_to_src(line_num) {
-            let backend = self.backends.get(&source_map.file_type);
-            backend
-        } else {
-            None
-        }
+    fn get_backend(&self, source_map: &SourceMap) -> Option<&Arc<Mutex<client::ClientForBackendServer>>> {
+        self.backends.get(&source_map.file_type)
+    }
+
+    fn get_source_map(&self, line_num: u16) -> Option<SourceMap> {
+        self.diff.as_ref().unwrap().map_diff_line_to_src(line_num)
     }
 
     #[allow(dead_code)]
@@ -107,6 +111,13 @@ impl DiffLsp {
 #[tower_lsp::async_trait]
 impl LanguageServer for DiffLsp {
     async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
+        println!("Diff LSP doing initialize.");
+
+        for backend_mutex in self.backends.values().into_iter() {
+            let mut backend = backend_mutex.lock().await;
+            backend.initialize().unwrap();
+        }
+
         Ok(InitializeResult {
             server_info: None,
             capabilities: ServerCapabilities {
@@ -164,9 +175,15 @@ impl LanguageServer for DiffLsp {
             .line
             .try_into()
             .unwrap();
-        let backend_mutex = self.get_backend(line).unwrap();
+        let source_map = self.get_source_map(line).unwrap();
+        let backend_mutex = self.get_backend(&source_map).unwrap();
         let mut backend = backend_mutex.lock().await;
-        let hov_res = backend.hover(params);
+        println!("sending hover to backend: {}", backend.lsp_command);
+        let mut mapped_params = params.clone();
+        mapped_params.text_document_position_params.text_document.uri = diff_lsp::uri_from_relative_filename(self.root, &source_map.file_name);
+        mapped_params.text_document_position_params.position.line = source_map.source_line.into();
+
+        let hov_res = backend.hover(mapped_params);
         println!("hov_res: {:?}", hov_res);
         match hov_res {
             Ok(res) => Ok(res),
@@ -177,10 +194,25 @@ impl LanguageServer for DiffLsp {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         println!("Opened document: {:?}", params);
         let _real_path = params.text_document.uri.path();
+        // get all the paths from all the diffs
 
-        // for (_, value) in self.backends.iter_mut() {
-        //     value.did_open(&params);
-        // }
+        let mut files = vec![];
+        if let Some(diff) = &self.diff {
+            for hunk in &diff.hunks {
+                files.push(hunk.filename.clone());
+            }
+        }
+
+        for filename in files {
+            let filetype = SupportedFileType::from_filename(filename.clone()).unwrap();
+            if let Some(backend_mutex) = self.backends.get(&filetype) {
+                let mut backend = backend_mutex.lock().await;
+                let mut these_params = params.clone();
+                these_params.text_document.uri =
+                    diff_lsp::uri_from_relative_filename(self.root.clone(), &filename);
+                backend.did_open(&these_params);
+            }
+        }
     }
 
     // async fn references(&self, _params: ReferenceParams) -> Result<Option<Vec<Location>>>{
@@ -194,7 +226,6 @@ impl LanguageServer for DiffLsp {
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::Borrow;
 
     use super::*;
     use crate::test_data;
@@ -202,7 +233,9 @@ mod tests {
 
     #[tokio::test]
     async fn end_to_end_test() {
+        // Note this test depends on the environment having rust-analyzer installed and on the path.
         let diff = MagitDiff::parse(test_data::RAW_MAGIT_DIFF).unwrap();
+        let root: String = expanduser("~/diff-lsp").unwrap().display().to_string();
 
         assert_eq!(
             diff.headers.get(&diff_lsp::DiffHeader::Buffer),
@@ -210,21 +243,26 @@ mod tests {
         );
 
         let backends = get_backends_map();
-        let (service, socket) =
-            LspService::new(|client| DiffLsp::new(client, backends, Some(diff)));
+        let (service, _socket) =
+            LspService::new(|client| DiffLsp::new(client, backends, Some(diff), root));
+
 
         // TODO make relative and include in project.
         let url = Url::from_file_path("/Users/chrishipple/test7.diff-test").unwrap();
         let hover_request = HoverParams {
             text_document_position_params: TextDocumentPositionParams {
-                text_document: (TextDocumentIdentifier {uri: url}),
+                text_document: (TextDocumentIdentifier { uri: url }),
                 position: Position {
-                    line: 13,
-                    character: 34,
+                    line: 24,
+                    character: 7,
                 },
             },
-            work_done_progress_params: WorkDoneProgressParams { work_done_token: None }
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
         };
-        let hover_result = service.inner().hover(hover_request).await.unwrap().unwrap();
+
+        let _init_res = service.inner().initialize(test_data::get_init_params()).await.unwrap();
+        let _hover_result = service.inner().hover(hover_request).await.unwrap().unwrap();
     }
 }

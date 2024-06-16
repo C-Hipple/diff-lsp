@@ -5,6 +5,12 @@ Middleware Language server parsing diffs
 Acts as a server from your editor's point-of-view, and as a client to your "backend" LSPs (such as rust-analyzer or gopls).
 
 
+Editor -> diff-lsp -> [rust-analyzer, gopls, pylsp, etc]
+
+Allows your editor to use the following lsp capabilities in diffs
+- Hover
+- TODO Jump Definition
+
 ## Usage
 
 `diff-lsp` follows the standard language-server protocol, so you can configure your clients to use this LSP server and it should *just work* (lol)

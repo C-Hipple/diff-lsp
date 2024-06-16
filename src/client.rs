@@ -74,29 +74,30 @@ impl ClientForBackendServer {
             client_info: None,
             locale: None,
         };
-        let message_type = "initialize".to_string();  // TODO: Is there an enum for this?
-
-        let raw_resp = self.send_request(message_type, params).unwrap();
+        let method = "initialize".to_string();  // TODO: Is there an enum for this?
+        println!("Sending initialize to backend {}", self.lsp_command);
+        let raw_resp = self.send_request(method, params).unwrap();
         let resp: InitializeResult = serde_json::from_value(raw_resp).unwrap();
         //println!("We got the response: {resp:?}");
 
         return Ok(resp);
     }
 
-    pub fn send_request<P: Serialize>(&mut self, _message_type: String, params: P) -> Result<Value> {
-        let _ser_params = serde_json::to_value(params).unwrap();
-        let raw_resp = self.send_value_request(_ser_params).unwrap();
+    pub fn send_request<P: Serialize>(&mut self, method: String, params: P) -> Result<Value> {
+        let ser_params = serde_json::to_value(params).unwrap();
+        println!("{}", ser_params);
+        let raw_resp = self.send_value_request(ser_params, method).unwrap();
         let as_value: Value = serde_json::from_str(&raw_resp).unwrap();
         Ok(as_value.get("result").unwrap().clone())
     }
 
-    pub fn send_value_request<P: Serialize>(&mut self, val: P) -> Result<String> {
+    pub fn send_value_request<P: Serialize>(&mut self, val: P, method: String) -> Result<String> {
         let std_in = self.process.stdin.as_mut().unwrap();
         // Also make the header
         let full_body = json!({
             "jsonrpc": "2.0".to_string(),
             "id": 1,
-            "method": "initialize".to_string(), // TODO: Right method name?
+            "method": method,
             "params": &val,
         });
         let full_binding = serde_json::to_string(&full_body).unwrap();
@@ -105,6 +106,7 @@ impl ClientForBackendServer {
             full_binding.len(),
             full_binding
         );
+        println!("msg: {}", msg);
 
         let _ = std_in.write_all(msg.as_bytes());
         let _ = std_in.flush();
@@ -118,7 +120,7 @@ impl ClientForBackendServer {
     }
 
     pub fn did_open(&mut self, params: &DidOpenTextDocumentParams) {
-        self.send_request("did_open".to_string(), params);
+        self.send_request("did_open".to_string(), params).unwrap();
     }
 
     pub fn hover(&mut self, params: HoverParams) -> Result<Option<Hover>> {
@@ -156,6 +158,7 @@ pub fn read_message<T: BufRead>(reader: &mut T) -> Result<String> {
     loop {
         buffer.clear();
         let _ = reader.read_line(&mut buffer)?;
+        println!("Buffer: {}", buffer);
         match &buffer {
             s if s.trim().is_empty() => break,
             s => {
@@ -175,5 +178,6 @@ pub fn read_message<T: BufRead>(reader: &mut T) -> Result<String> {
     reader.read_exact(&mut body_buffer)?;
 
     let body = String::from_utf8(body_buffer)?;
+    println!("body {}", body);
     Ok(body)
 }

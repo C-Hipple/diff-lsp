@@ -1,3 +1,5 @@
+use tower_lsp::lsp_types::*;
+
 pub const RAW_MAGIT_DIFF: &str = r#"Project: magit: diff-lsp
 Root: /Users/chrishipple/diff-lsp/
 Buffer: diff-lsp
@@ -58,3 +60,33 @@ d083654 more readme
 4d7867a following tutorial on tower-lsp
 
 "#;
+
+
+pub fn get_init_params() -> tower_lsp::lsp_types::InitializeParams {
+    #[allow(deprecated)] // root_path is deprecated but without it, code doesn't compile? :(
+    InitializeParams {
+        process_id: None,
+        root_path: None,
+        root_uri: None,
+        initialization_options: None,
+        capabilities: ClientCapabilities {
+            workspace: None,
+            text_document: {
+                Some(TextDocumentClientCapabilities {
+                    hover: Some(HoverClientCapabilities::default()),
+                    references: Some(ReferenceClientCapabilities {
+                        dynamic_registration: Some(false),
+                    }),
+                    ..Default::default()
+                })
+            },
+            window: None,
+            general: None,
+            experimental: None,
+        },
+        trace: None,
+        workspace_folders: None,
+        client_info: None,
+        locale: None,
+    }
+}
