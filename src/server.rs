@@ -134,6 +134,11 @@ impl LanguageServer for DiffLsp {
     }
 
     async fn initialized(&self, _: InitializedParams) {
+
+        for backend_mutex in self.backends.values().into_iter() {
+            let mut backend = backend_mutex.lock().await;
+            backend.initialized();
+        }
         self.client
             .log_message(MessageType::INFO, "Initialized!")
             .await;
@@ -179,7 +184,6 @@ impl LanguageServer for DiffLsp {
         let source_map = self.get_source_map(line).unwrap();
         let backend_mutex = self.get_backend(&source_map).unwrap();
         let mut backend = backend_mutex.lock().await;
-        println!("sending hover to backend: {}", backend.lsp_command);
         let mut mapped_params = params.clone();
         mapped_params.text_document_position_params.text_document.uri = diff_lsp::uri_from_relative_filename(self.root.clone(), &source_map.file_name);
         mapped_params.text_document_position_params.position.line = source_map.source_line.into();
@@ -192,7 +196,7 @@ impl LanguageServer for DiffLsp {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        println!("Opened document: {:?}", params);
+        // println!("Opened document: {:?}", params);  // uncomment to show that we get diff-test as our did open, but we send the real file to the backend
         let _real_path = params.text_document.uri.path();
         // get all the paths from all the diffs
 
@@ -271,6 +275,10 @@ mod tests {
         };
 
         let _init_res = service.inner().initialize(test_data::get_init_params()).await.unwrap();
+        // println!("_init_res: {:?}", _init_res);
+
+        service.inner().initialized( InitializedParams{}).await;
+
         let _open_res = service.inner().did_open(test_data::get_open_params(url)).await;
 
         let _hover_result = service.inner().hover(hover_request).await.unwrap().unwrap();

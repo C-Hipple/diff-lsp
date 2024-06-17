@@ -61,7 +61,6 @@ async fn main() {
     // Testing to make sure we can properly interface with teh backends
     // let mut rust_analyzer2 = client::ClientForBackendServer::new("rust-analyzer".to_string());
     // rust_analyzer2.initialize().unwrap();
-    //println!("init res was: {init_res:?}");
     info!("Starting Logger");
 
     println!("Goodbye world.");

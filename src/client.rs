@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Write, Read, IsTerminal};
 use std::path::PathBuf;
+
 use std::{
     process::{Child, Command, Stdio},
     //thread::{spawn},
@@ -26,7 +27,10 @@ pub struct ClientForBackendServer {
 
 fn start_server(command: String) -> Result<Child> {
     let mut process = Command::new(&command);
+    //process.current_dir();
     let child = process
+        // TODO actually set teh current dir; will be easy once we start the servers when our server gets a didOpen
+        .current_dir("/Users/chrishipple/diff-lsp")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -73,7 +77,7 @@ impl ClientForBackendServer {
             locale: None,
         };
         let method = "initialize".to_string();  // TODO: Is there an enum for this?
-        println!("Sending initialize to backend {}", self.lsp_command);
+        // println!("Sending initialize to backend {}", self.lsp_command);
         let raw_resp = self.request(method, params).unwrap();
         let resp: InitializeResult = serde_json::from_value(raw_resp).unwrap();
         //println!("We got the response: {resp:?}");
@@ -81,16 +85,23 @@ impl ClientForBackendServer {
         return Ok(resp);
     }
 
-    pub fn request<P: Serialize>(&mut self, method: String, params: P) -> Result<Value> {
+    pub fn initialized(&mut self) {
+        // send the initialized notification
+        self.notify("initialized".to_string(), InitializedParams{})
+    }
+
+    fn request<P: Serialize>(&mut self, method: String, params: P) -> Result<Value> {
         let ser_params = serde_json::to_value(params).unwrap();
-        println!("{}", ser_params);
+        println!("Sending request {} to backend {}", method, self.lsp_command);
         let raw_resp = self.send_value_request(ser_params, method, true).unwrap();
         let as_value: Value = serde_json::from_str(&raw_resp).unwrap();
         Ok(as_value.get("result").unwrap().clone())
     }
 
     pub fn notify<P: Serialize>(&mut self, method: String, val: P) {
+
         // Just like a request, but does not expect a response.
+        println!("Sending notification {} to backend {}", method, self.lsp_command);
         self.send_value_request(val, method, false).unwrap();
     }
 
@@ -109,12 +120,20 @@ impl ClientForBackendServer {
             full_binding.len(),
             full_binding
         );
-        println!("msg: {}", msg);
+        // println!("msg: {}", msg);
 
         let _ = std_in.write_all(msg.as_bytes());
         let _ = std_in.flush();
 
         if !check_response {
+            // // was testing if maybe there was other error output
+            // let std_err = self.process.stderr.as_mut().unwrap();
+            // let mut stderr_reader = BufReader::new(std_err);
+            // let mut body_buffer = vec![0; 200];
+            // if !stderr_reader.is_terminal {
+            //     let _ = stderr_reader.read(&mut body_buffer);
+            //     println!("Backend stderr: {:?}", String::from_utf8(body_buffer));
+            // }
             return Ok("".to_string())
         }
 
@@ -122,8 +141,17 @@ impl ClientForBackendServer {
         let mut stdout_reader = BufReader::new(std_out);
 
         let resp = read_message(&mut stdout_reader);
-
-        Ok(resp?)
+        match resp {
+            Ok(r) => Ok(r),
+            Err(e) => {
+                let std_err = self.process.stderr.as_mut().unwrap();
+                let mut stderr_reader = BufReader::new(std_err);
+                let mut body_buffer = vec![0; 200];
+                let _ = stderr_reader.read(&mut body_buffer).unwrap();
+                println!("Backend stderr: {:?}", String::from_utf8(body_buffer));
+                Err(e)
+            }
+        }
     }
 
     pub fn did_open(&mut self, params: &DidOpenTextDocumentParams) {
@@ -165,7 +193,7 @@ pub fn read_message<T: BufRead>(reader: &mut T) -> Result<String> {
     loop {
         buffer.clear();
         let _ = reader.read_line(&mut buffer)?;
-        println!("Buffer: {}", buffer);
+        //println!("Buffer: {}", buffer);
         match &buffer {
             s if s.trim().is_empty() => break,
             s => {
@@ -185,6 +213,6 @@ pub fn read_message<T: BufRead>(reader: &mut T) -> Result<String> {
     reader.read_exact(&mut body_buffer)?;
 
     let body = String::from_utf8(body_buffer)?;
-    println!("body {}", body);
+    // println!("body {}", body);
     Ok(body)
 }
