@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use std::io::{BufRead, BufReader, Write, Read, IsTerminal};
+use std::io::{BufRead, BufReader, Write, Read};
 use std::path::PathBuf;
 
 use std::{
@@ -23,6 +23,8 @@ pub struct ClientForBackendServer {
     process: Child,
     #[allow(dead_code)]
     path: Option<PathBuf>,
+    request_id: i32,
+
 }
 
 fn start_server(command: String) -> Result<Child> {
@@ -48,7 +50,13 @@ impl ClientForBackendServer {
             lsp_command: command.clone(),
             process: start_server(command.clone()).unwrap(),
             path: None,
+            request_id: 1,
         }
+    }
+
+    fn get_request_id(&mut self) -> i32 {
+        self.request_id = self.request_id + 1;
+        self.request_id.clone()
     }
 
     #[allow(deprecated)] // root_path is deprecated but without it, code doesn't compile? :(
@@ -98,29 +106,41 @@ impl ClientForBackendServer {
         Ok(as_value.get("result").unwrap().clone())
     }
 
-    pub fn notify<P: Serialize>(&mut self, method: String, val: P) {
-
+    pub fn notify<P: Serialize>(&mut self, method: String, params: P) {
         // Just like a request, but does not expect a response.
+        let ser_params = serde_json::to_value(params).unwrap();
         println!("Sending notification {} to backend {}", method, self.lsp_command);
-        self.send_value_request(val, method, false).unwrap();
+        self.send_value_request(ser_params, method, false).unwrap();
     }
 
     fn send_value_request<P: Serialize>(&mut self, val: P, method: String, check_response: bool) -> Result<String> {
+        let id = self.get_request_id();
         let std_in = self.process.stdin.as_mut().unwrap();
         // Also make the header
-        let full_body = json!({
-            "jsonrpc": "2.0".to_string(),
-            "id": 1,
-            "method": method,
-            "params": &val,
-        });
+        let full_body;
+        if check_response {
+            full_body = json!({
+                "jsonrpc": "2.0".to_string(),
+                "id": id as usize,
+                "method": method,
+                "params": &val,
+            });
+        } else {
+            full_body = json!({
+                "jsonrpc": "2.0".to_string(),
+                "method": method,
+                "params": &val,
+            });
+        }
         let full_binding = serde_json::to_string(&full_body).unwrap();
         let msg = format!(
             "Content-Length: {}\r\n\r\n{}",
             full_binding.len(),
             full_binding
         );
-        // println!("msg: {}", msg);
+        if method.contains("ized") {
+            println!("msg: {}", msg);
+        }
 
         let _ = std_in.write_all(msg.as_bytes());
         let _ = std_in.flush();
@@ -130,10 +150,8 @@ impl ClientForBackendServer {
             // let std_err = self.process.stderr.as_mut().unwrap();
             // let mut stderr_reader = BufReader::new(std_err);
             // let mut body_buffer = vec![0; 200];
-            // if !stderr_reader.is_terminal {
-            //     let _ = stderr_reader.read(&mut body_buffer);
-            //     println!("Backend stderr: {:?}", String::from_utf8(body_buffer));
-            // }
+            // let _ = stderr_reader.read(&mut body_buffer);
+            // println!("Backend stderr: {:?}", String::from_utf8(body_buffer));
             return Ok("".to_string())
         }
 
@@ -159,10 +177,14 @@ impl ClientForBackendServer {
     }
 
     pub fn hover(&mut self, params: HoverParams) -> Result<Option<Hover>> {
+        println!("Doing hover with teh params: {:?}", params);
         let res = self.request("textDocument/hover".to_string(), params).unwrap();
-        let hover_res: Hover = serde_json::from_value(res).unwrap();
-        Ok(Some(hover_res))
-    }
+        println!("Got the hover res: {}", res);
+        let hover_res: Result<Hover, serde_json::Error> = serde_json::from_value(res);
+        match hover_res {
+            Ok(parsed_res) => Ok(Some(parsed_res)),
+            Err(_) => Ok(None)
+        }}
 }
 
 pub enum LspHeader {

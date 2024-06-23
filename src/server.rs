@@ -1,16 +1,17 @@
 use diff_lsp::SourceMap;
 use serde::{Deserialize, Serialize};
+
 use std::collections::HashMap;
 use std::fs;
 
-use itertools::Itertools;
 use expanduser::expanduser;
+use itertools::Itertools;
 use serde_json::Value;
 use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
 use tower_lsp::lsp_types::notification::Notification;
 use tower_lsp::lsp_types::*;
+use tower_lsp::LspService;
 use tower_lsp::{Client, LanguageServer};
-use tower_lsp::{LspService};
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -44,16 +45,17 @@ impl Notification for CustomNotification {
 pub fn get_backends_map() -> HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>>
 {
     let rust_analyzer = client::ClientForBackendServer::new("rust-analyzer".to_string());
-    let gopls = client::ClientForBackendServer::new("gopls".to_string());
-    // MAYBE global pylsp :/ ?
-    let pylsp = client::ClientForBackendServer::new("pylsp".to_string());
+    println!("started rust-analyzer.");
+    // let gopls = client::ClientForBackendServer::new("gopls".to_string());
+    // // MAYBE global pylsp :/ ?
+    // let pylsp = client::ClientForBackendServer::new("pylsp".to_string());
 
     let mut backends: HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>> =
         HashMap::new();
 
     backends.insert(SupportedFileType::Rust, Arc::new(Mutex::new(rust_analyzer)));
-    backends.insert(SupportedFileType::Go, Arc::new(Mutex::new(gopls)));
-    backends.insert(SupportedFileType::Python, Arc::new(Mutex::new(pylsp)));
+    // backends.insert(SupportedFileType::Go, Arc::new(Mutex::new(gopls)));
+    // backends.insert(SupportedFileType::Python, Arc::new(Mutex::new(pylsp)));
     backends
 }
 
@@ -95,7 +97,10 @@ impl DiffLsp {
         }
     }
 
-    fn get_backend(&self, source_map: &SourceMap) -> Option<&Arc<Mutex<client::ClientForBackendServer>>> {
+    fn get_backend(
+        &self,
+        source_map: &SourceMap,
+    ) -> Option<&Arc<Mutex<client::ClientForBackendServer>>> {
         self.backends.get(&source_map.file_type)
     }
 
@@ -112,11 +117,14 @@ impl DiffLsp {
 #[tower_lsp::async_trait]
 impl LanguageServer for DiffLsp {
     async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
-        println!("Diff LSP doing initialize.");
-
         for backend_mutex in self.backends.values().into_iter() {
             let mut backend = backend_mutex.lock().await;
-            backend.initialize().unwrap();
+            println!(
+                "Diff LSP doing initialize for backend: {:?}",
+                backend.lsp_command
+            );
+            let res = backend.initialize().unwrap();
+            return Ok(res);
         }
 
         Ok(InitializeResult {
@@ -134,9 +142,12 @@ impl LanguageServer for DiffLsp {
     }
 
     async fn initialized(&self, _: InitializedParams) {
-
         for backend_mutex in self.backends.values().into_iter() {
             let mut backend = backend_mutex.lock().await;
+            println!(
+                "Diff LSP doing initialized for backend: {:?}",
+                backend.lsp_command
+            );
             backend.initialized();
         }
         self.client
@@ -185,7 +196,10 @@ impl LanguageServer for DiffLsp {
         let backend_mutex = self.get_backend(&source_map).unwrap();
         let mut backend = backend_mutex.lock().await;
         let mut mapped_params = params.clone();
-        mapped_params.text_document_position_params.text_document.uri = diff_lsp::uri_from_relative_filename(self.root.clone(), &source_map.file_name);
+        mapped_params
+            .text_document_position_params
+            .text_document
+            .uri = diff_lsp::uri_from_relative_filename(self.root.clone(), &source_map.file_name);
         mapped_params.text_document_position_params.position.line = source_map.source_line.into();
         let hov_res = backend.hover(mapped_params);
         println!("hov_res: {:?}", hov_res);
@@ -221,10 +235,23 @@ impl LanguageServer for DiffLsp {
                 these_params.text_document.uri =
                     diff_lsp::uri_from_relative_filename(self.root.clone(), &filename);
                 these_params.text_document.text = text;
-                println!("Calling Did open to {:?} for file {:?}; with text: {:?}", backend.lsp_command, these_params.text_document.uri.path(), these_params.text_document.text);
+                println!(
+                    "Calling Did open to {:?} for file {:?}; with text: {:?}",
+                    backend.lsp_command,
+                    these_params.text_document.uri.path(),
+                    these_params.text_document.text
+                );
                 backend.did_open(&these_params);
             }
         }
+    }
+
+    async fn did_change(&self, _params: DidChangeTextDocumentParams) {
+        println!("Calling did_change")
+    }
+
+    async fn did_close(&self, _params: DidCloseTextDocumentParams) {
+        println!("Calling did_close")
     }
 
     // async fn references(&self, _params: ReferenceParams) -> Result<Option<Vec<Location>>>{
@@ -240,9 +267,8 @@ impl LanguageServer for DiffLsp {
 mod tests {
 
     use super::*;
-    use crate::test_data;
+    use crate::test_data::{self};
     use diff_lsp::MagitDiff;
-
     #[tokio::test]
     async fn end_to_end_test() {
         // Note this test depends on the environment having rust-analyzer installed and on the path.
@@ -258,14 +284,13 @@ mod tests {
         let (service, _socket) =
             LspService::new(|client| DiffLsp::new(client, backends, Some(diff), root));
 
-
         // TODO make relative and include in project.
         let url = Url::from_file_path("/Users/chrishipple/test7.diff-test").unwrap();
         let hover_request = HoverParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: (TextDocumentIdentifier { uri: url.clone() }),
                 position: Position {
-                    line: 24,
+                    line: 19,
                     character: 15,
                 },
             },
@@ -274,13 +299,19 @@ mod tests {
             },
         };
 
-        let _init_res = service.inner().initialize(test_data::get_init_params()).await.unwrap();
-        // println!("_init_res: {:?}", _init_res);
+        let _init_res = service
+            .inner()
+            .initialize(test_data::get_init_params())
+            .await
+            .unwrap();
+        println!("_init_res: {:?}", _init_res);
 
-        service.inner().initialized( InitializedParams{}).await;
+        service.inner().initialized(InitializedParams {}).await;
 
-        let _open_res = service.inner().did_open(test_data::get_open_params(url)).await;
+        service.inner().did_open(test_data::get_open_params(url)).await;
 
         let _hover_result = service.inner().hover(hover_request).await.unwrap().unwrap();
+        assert_eq!(1, 2);
+
     }
 }
