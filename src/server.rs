@@ -344,7 +344,7 @@ mod tests {
             LspService::new(|client| DiffLsp::new(client, backends, Some(diff), root));
 
         // TODO make relative and include in project.
-        let url = Url::from_file_path("/Users/chrishipple/go-diff.diff-test").unwrap();
+        let url = Url::from_file_path("/Users/chrishipple/lsp-example/go-diff.diff-test").unwrap();
         let hover_request = HoverParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: (TextDocumentIdentifier { uri: url.clone() }),
