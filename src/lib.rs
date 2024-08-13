@@ -127,6 +127,7 @@ impl Hunk {
     }
 }
 
+#[derive(Debug)]
 pub struct SourceMap {
     // Return type when you translate a
     pub file_name: String,
@@ -251,12 +252,6 @@ impl MagitDiff {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
-    }
 
     #[test]
     fn test_parse_hunk() {
@@ -385,5 +380,11 @@ d083654 more readme
         assert_eq!(second_hunk.diff_location, 25);
     }
 
+    #[test]
+    fn test_uri_for_rel() {
+        let output = uri_from_relative_filename("/Users/chrishipple/diff-lsp/".to_string(), "src/main.rs");
+        println!("output {:?}", output.as_str());
+        assert_eq!("file:///Users/chrishipple/diff-lsp/src/main.rs", output.as_str());
+    }
 
 }

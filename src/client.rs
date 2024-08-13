@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use std::{
     process::{Child, Command, Stdio},
+    fs::canonicalize,
     //thread::{spawn},
     //path::{PathBuf}, io::Read,
 };
@@ -24,15 +25,15 @@ pub struct ClientForBackendServer {
     #[allow(dead_code)]
     path: Option<PathBuf>,
     request_id: i32,
-
 }
 
-fn start_server(command: String) -> Result<Child> {
+fn start_server(command: String, dir: &str) -> Result<Child> {
     let mut process = Command::new(&command);
     //process.current_dir();
     let child = process
         // TODO actually set teh current dir; will be easy once we start the servers when our server gets a didOpen
-        .current_dir("/Users/chrishipple/diff-lsp")
+        // .current_dir(canonicalize("/Users/chrishipple/diff-lsp").unwrap())
+        .current_dir(canonicalize(dir).unwrap())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -45,11 +46,11 @@ fn start_server(command: String) -> Result<Child> {
 }
 
 impl ClientForBackendServer {
-    pub fn new(command: String) -> Self {
+    pub fn new(command: String, directory: &str) -> Self {
         ClientForBackendServer {
             lsp_command: command.clone(),
-            process: start_server(command.clone()).unwrap(),
-            path: None,
+            process: start_server(command.clone(), directory).unwrap(),
+            path: Some(canonicalize(directory).unwrap()),
             request_id: 1,
         }
     }
@@ -61,9 +62,10 @@ impl ClientForBackendServer {
 
     #[allow(deprecated)] // root_path is deprecated but without it, code doesn't compile? :(
     pub fn initialize(&mut self) -> Result<InitializeResult> {
+        println!("path: {:?}", self.path.clone());
         let params = InitializeParams {
-            process_id: None,
-            root_path: None,
+            process_id: Some(self.process.id()),
+            root_path: Some(self.path.clone().unwrap().into_os_string().into_string().unwrap()),
             root_uri: None,
             initialization_options: None,
             capabilities: ClientCapabilities {
@@ -71,7 +73,8 @@ impl ClientForBackendServer {
                 text_document: {
                     Some(TextDocumentClientCapabilities {
                         hover: Some(HoverClientCapabilities::default()),
-                        references: Some(ReferenceClientCapabilities{dynamic_registration: Some(false)}),
+                        //references: Some(ReferenceClientCapabilities{dynamic_registration: None}),
+                        references: None,
                         ..Default::default()
                     })
                 },
@@ -81,7 +84,7 @@ impl ClientForBackendServer {
             },
             trace: None,
             workspace_folders: None,
-            client_info: None,
+            client_info: Some(ClientInfo { name: "diff-lsp-client".to_string(), version: Some("0.0.1".to_string()) }),
             locale: None,
         };
         let method = "initialize".to_string();  // TODO: Is there an enum for this?
@@ -95,12 +98,12 @@ impl ClientForBackendServer {
 
     pub fn initialized(&mut self) {
         // send the initialized notification
-        self.notify("initialized".to_string(), InitializedParams{})
+        let _ = self.notify("initialized".to_string(), InitializedParams{});
     }
 
     fn request<P: Serialize>(&mut self, method: String, params: P) -> Result<Value> {
         let ser_params = serde_json::to_value(params).unwrap();
-        println!("Sending request {} to backend {}", method, self.lsp_command);
+        println!("Sending request {} to backend {}: {}", method, self.lsp_command, ser_params);
         let raw_resp = self.send_value_request(ser_params, method, true).unwrap();
         let as_value: Value = serde_json::from_str(&raw_resp).unwrap();
         Ok(as_value.get("result").unwrap().clone())
@@ -157,10 +160,21 @@ impl ClientForBackendServer {
 
         let std_out = self.process.stdout.as_mut().unwrap();
         let mut stdout_reader = BufReader::new(std_out);
+        // let mut stdout_reader = BufReader::new(std_out);
+        //let mut stdout_reader = TimeoutReader::new(std_out, Duration::new(2, 0));
 
         let resp = read_message(&mut stdout_reader);
         match resp {
-            Ok(r) => Ok(r),
+            Ok(r) => {
+                println!("Okay! {:?}", r);
+                if r.contains("registerCapability") {
+                    println!("Got a register response");
+                    if let Ok(r) = read_message(&mut stdout_reader) {
+                        return Ok(r)
+                    }
+                }
+                Ok(r)
+            },
             Err(e) => {
                 let std_err = self.process.stderr.as_mut().unwrap();
                 let mut stderr_reader = BufReader::new(std_err);
@@ -211,10 +225,14 @@ fn parse_header(s: &str) -> Result<LspHeader> {
 pub fn read_message<T: BufRead>(reader: &mut T) -> Result<String> {
     let mut buffer = String::new();
     let mut content_length: Option<usize> = None;
+    //let start = SystemTime::now();
 
     loop {
+        println!("loopasurus");
         buffer.clear();
+        //let _ = reader.read_to_string(&mut buffer);
         let _ = reader.read_line(&mut buffer)?;
+        println!("after hurr");
         //println!("Buffer: {}", buffer);
         match &buffer {
             s if s.trim().is_empty() => break,

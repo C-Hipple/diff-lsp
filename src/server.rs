@@ -2,6 +2,7 @@ use diff_lsp::SourceMap;
 use serde::{Deserialize, Serialize};
 
 use std::collections::HashMap;
+use std::env;
 use std::fs;
 
 use expanduser::expanduser;
@@ -42,19 +43,20 @@ impl Notification for CustomNotification {
     const METHOD: &'static str = "custom/notification";
 }
 
-pub fn get_backends_map() -> HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>>
-{
-    let rust_analyzer = client::ClientForBackendServer::new("rust-analyzer".to_string());
-    println!("started rust-analyzer.");
-    // let gopls = client::ClientForBackendServer::new("gopls".to_string());
+pub fn get_backends_map(
+    dir: &str,
+) -> HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>> {
+    //let rust_analyzer = client::ClientForBackendServer::new("rust-analyzer".to_string());
+    // println!("started rust-analyzer.");
+    let gopls = client::ClientForBackendServer::new("gopls".to_string(), dir);
     // // MAYBE global pylsp :/ ?
     // let pylsp = client::ClientForBackendServer::new("pylsp".to_string());
 
     let mut backends: HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>> =
         HashMap::new();
 
-    backends.insert(SupportedFileType::Rust, Arc::new(Mutex::new(rust_analyzer)));
-    // backends.insert(SupportedFileType::Go, Arc::new(Mutex::new(gopls)));
+    //backends.insert(SupportedFileType::Rust, Arc::new(Mutex::new(rust_analyzer)));
+    backends.insert(SupportedFileType::Go, Arc::new(Mutex::new(gopls)));
     // backends.insert(SupportedFileType::Python, Arc::new(Mutex::new(pylsp)));
     backends
 }
@@ -193,14 +195,17 @@ impl LanguageServer for DiffLsp {
             .try_into()
             .unwrap();
         let source_map = self.get_source_map(line).unwrap();
+        println!("source map: {:?}", source_map);
         let backend_mutex = self.get_backend(&source_map).unwrap();
         let mut backend = backend_mutex.lock().await;
         let mut mapped_params = params.clone();
+        let uri = diff_lsp::uri_from_relative_filename(self.root.clone(), &source_map.file_name);
         mapped_params
             .text_document_position_params
             .text_document
-            .uri = diff_lsp::uri_from_relative_filename(self.root.clone(), &source_map.file_name);
+            .uri = uri;
         mapped_params.text_document_position_params.position.line = source_map.source_line.into();
+        println!("Hover mapped params: {:?}", mapped_params);
         let hov_res = backend.hover(mapped_params);
         println!("hov_res: {:?}", hov_res);
         match hov_res {
@@ -211,7 +216,7 @@ impl LanguageServer for DiffLsp {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         // println!("Opened document: {:?}", params);  // uncomment to show that we get diff-test as our did open, but we send the real file to the backend
-        let _real_path = params.text_document.uri.path();
+        let _real_path = params.text_document.uri.as_str();
         // get all the paths from all the diffs
 
         let mut files = vec![];
@@ -223,6 +228,7 @@ impl LanguageServer for DiffLsp {
 
         // not sure how to type hint the Vec<String> doing this in the loop constructor
         let filtered_files: Vec<String> = files.into_iter().unique().collect();
+        // TODO filter by filetype?
         for filename in filtered_files {
             let filetype = SupportedFileType::from_filename(filename.clone()).unwrap();
             if let Some(backend_mutex) = self.backends.get(&filetype) {
@@ -230,7 +236,9 @@ impl LanguageServer for DiffLsp {
                 let mut these_params = params.clone();
                 // Here we need to break the LSP contract and use the originator's didOpen URI to read the contents of the file.
 
-                let text = fs::read_to_string(filename.clone()).unwrap();
+                println!("filename: {:?}", filename.clone());
+                let full_path = self.root.clone() + "/" + &filename;
+                let text = fs::read_to_string(full_path).unwrap();
 
                 these_params.text_document.uri =
                     diff_lsp::uri_from_relative_filename(self.root.clone(), &filename);
@@ -238,7 +246,7 @@ impl LanguageServer for DiffLsp {
                 println!(
                     "Calling Did open to {:?} for file {:?}; with text: {:?}",
                     backend.lsp_command,
-                    these_params.text_document.uri.path(),
+                    these_params.text_document.uri.as_str(),
                     these_params.text_document.text
                 );
                 backend.did_open(&these_params);
@@ -267,12 +275,14 @@ impl LanguageServer for DiffLsp {
 mod tests {
 
     use super::*;
-    use crate::test_data::{self};
+    //use crate::test_data::{self};
+    use crate::test_data::*;
     use diff_lsp::MagitDiff;
-    #[tokio::test]
-    async fn end_to_end_test() {
+
+    // #[tokio::test]
+    async fn end_to_end_test_rust_analyzer() {
         // Note this test depends on the environment having rust-analyzer installed and on the path.
-        let diff = MagitDiff::parse(test_data::RAW_MAGIT_DIFF).unwrap();
+        let diff = MagitDiff::parse(test_data::RAW_MAGIT_DIFF_RUST).unwrap();
         let root: String = expanduser("~/diff-lsp").unwrap().display().to_string();
 
         assert_eq!(
@@ -280,7 +290,7 @@ mod tests {
             Some(&"diff-lsp".to_string())
         );
 
-        let backends = get_backends_map();
+        let backends = get_backends_map(&root);
         let (service, _socket) =
             LspService::new(|client| DiffLsp::new(client, backends, Some(diff), root));
 
@@ -304,14 +314,84 @@ mod tests {
             .initialize(test_data::get_init_params())
             .await
             .unwrap();
+
         println!("_init_res: {:?}", _init_res);
 
         service.inner().initialized(InitializedParams {}).await;
+        service
+            .inner()
+            .did_open(test_data::get_open_params_rust(url))
+            .await;
 
-        service.inner().did_open(test_data::get_open_params(url)).await;
-
-        let _hover_result = service.inner().hover(hover_request).await.unwrap().unwrap();
+        let hover_result = service.inner().hover(hover_request).await.unwrap().unwrap();
+        println!("{:?}", hover_result);
         assert_eq!(1, 2);
+    }
 
+    #[tokio::test]
+    async fn end_to_end_test_gopls() {
+        // Note this test depends on the environment having gopls installed and on the path.
+        let diff = MagitDiff::parse(test_data::RAW_MAGIT_DIFF_GO).unwrap();
+        let root: String = expanduser("~/lsp-example").unwrap().display().to_string();
+        println!("Root is {:?}", root);
+
+        assert_eq!(
+            diff.headers.get(&diff_lsp::DiffHeader::Buffer),
+            Some(&"lsp-example".to_string())
+        );
+        let backends = get_backends_map(&root);
+        let (service, _socket) =
+            LspService::new(|client| DiffLsp::new(client, backends, Some(diff), root));
+
+        // TODO make relative and include in project.
+        let url = Url::from_file_path("/Users/chrishipple/go-diff.diff-test").unwrap();
+        let hover_request = HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: (TextDocumentIdentifier { uri: url.clone() }),
+                position: Position {
+                    line: 18,
+                    character: 14,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+        };
+
+        let _init_res = service
+            .inner()
+            .initialize(test_data::get_init_params())
+            .await
+            .unwrap();
+
+        println!("_init_res: {:?}", _init_res);
+
+        service.inner().initialized(InitializedParams {}).await;
+        service
+            .inner()
+            .did_open(test_data::get_open_params_go(url))
+            .await;
+
+        let hover_result = service.inner().hover(hover_request).await.unwrap().unwrap();
+        println!("{:?}", hover_result);
+        assert_eq!(1, 2);
+    }
+    // TODO move to lib.rs but having trouble importing test_data there
+    use diff_lsp::DiffHeader;
+    #[test]
+    fn test_parse_go_magit_diff() {
+        let parsed_diff = MagitDiff::parse(test_data::RAW_MAGIT_DIFF_GO).unwrap();
+        assert_eq!(
+            parsed_diff.headers.get(&DiffHeader::Buffer),
+            Some(&"lsp-example".to_string())
+        );
+        assert_eq!(
+            parsed_diff.headers.get(&DiffHeader::Type),
+            Some(&"magit-status".to_string())
+        );
+        assert_eq!(
+            parsed_diff.headers.get(&DiffHeader::Project),
+            Some(&"magit: lsp-example".to_string())
+        );
     }
 }

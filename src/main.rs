@@ -1,6 +1,7 @@
 use std::fs::{remove_file, OpenOptions};
 use std::io::prelude::*;
 use std::path::PathBuf;
+use std::env::current_dir;
 
 
 use diff_lsp::SupportedFileType;
@@ -13,6 +14,7 @@ mod server;
 mod test_data;
 
 fn logfile_path() -> PathBuf {
+    println!("setting logfile path");
     expanduser("~/.diff-lsp.log").unwrap()
 }
 
@@ -50,11 +52,10 @@ pub fn init() -> Result<(), SetLoggerError> {
 
 #[tokio::main]
 async fn main() {
-    println!("Hello, world!");
 
     let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
-
-    let backends = server::get_backends_map();
+    let cwd = current_dir().unwrap();
+    let backends = server::get_backends_map(cwd.to_str().unwrap());
     let root: String = expanduser("~/diff-lsp").unwrap().display().to_string();
     let (diff_lsp_service, socket) = LspService::new(|client| server::DiffLsp::new(client, backends, None, root));
 

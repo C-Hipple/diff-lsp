@@ -1,6 +1,8 @@
+pub mod test_data {
+
 use tower_lsp::lsp_types::*;
 
-pub const RAW_MAGIT_DIFF: &str = r#"Project: magit: diff-lsp
+pub const RAW_MAGIT_DIFF_RUST: &str = r#"Project: magit: diff-lsp
 Root: /Users/chrishipple/diff-lsp/
 Buffer: diff-lsp
 Type: magit-status
@@ -58,9 +60,77 @@ d083654 more readme
 9ce2121 working on adding the client
 8ffb4ce Added hover support with static suggestion
 4d7867a following tutorial on tower-lsp
-
 "#;
 
+pub const RAW_MAGIT_DIFF_GO: &str = r#"Project: magit: lsp-example
+Root: /Users/chrishipple/lsp-example/
+Buffer: lsp-example
+Type: magit-status
+Head:     main little cleanup
+Merge:    origin/main little cleanup
+Push:     origin/main little cleanup
+
+Unstaged changes (2)
+modified   main.go
+@@ -11,9 +11,10 @@ import (
+    "github.com/TobiasYin/go-lsp/logs"
+ )
+
++var logger *log.Logger
++var logPath *string
++
+ func init() {
+-	var logger *log.Logger
+-	var logPath *string
+    defer func() {
+        logs.Init(logger)
+    }()
+@@ -34,7 +35,8 @@ func init() {
+    }
+    f, err := os.Create(p)
+    if err == nil {
+-		logger = log.New(f, "", 0)
++		logger = log.New(f, "new", 0)
++		logger.Println("My Logging start")
+        return
+    }
+    panic(fmt.Sprintf("logs init error: %v", err))
+@@ -42,6 +44,8 @@ func init() {
+ }
+
+ func main() {
++	logger.Println("Logging start")
++	fmt.Printf("log.Logger: %v\n", "starting")
+    lsp_server := server.MyServer()
+    lsp_server.Run()
+ }
+modified   server/server.go
+@@ -9,14 +9,14 @@ import (
+
+ func MyServer() *lsp.Server {
+    progress := false
+-	options := &lsp.Options{
++	options := lsp.Options{
+        Address: "127.0.0.1:9907",
+        HoverProvider: &defines.HoverOptions{
+            WorkDoneProgressOptions: defines.WorkDoneProgressOptions{
+                WorkDoneProgress: &progress}},
++		TextDocumentSync: 0,
+    }
+-	server := lsp.NewServer(options)
++	server := lsp.NewServer(&options)
+    server.OnHover(components.Hover)
+-
+    return server
+ }
+
+Recent commits
+1332ff8 origin/main little cleanup
+1511d2c a bit more hover stuff
+3d20bcb working hover provider!
+401e3c0 doing golang
+c800636 Initial commit
+"#;
 
 pub fn get_init_params() -> tower_lsp::lsp_types::InitializeParams {
     #[allow(deprecated)] // root_path is deprecated but without it, code doesn't compile? :(
@@ -91,6 +161,26 @@ pub fn get_init_params() -> tower_lsp::lsp_types::InitializeParams {
     }
 }
 
-pub fn get_open_params(uri: Url) -> tower_lsp::lsp_types::DidOpenTextDocumentParams {
-    DidOpenTextDocumentParams { text_document: TextDocumentItem { uri: (uri), language_id: "rust".to_string(), version: 1, text: RAW_MAGIT_DIFF.to_string() } }
+pub fn get_open_params_rust(uri: Url) -> tower_lsp::lsp_types::DidOpenTextDocumentParams {
+    DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: (uri),
+            language_id: "rust".to_string(),
+            version: 1,
+            text: RAW_MAGIT_DIFF_RUST.to_string(),
+        },
+    }
+}
+
+pub fn get_open_params_go(uri: Url) -> tower_lsp::lsp_types::DidOpenTextDocumentParams {
+    DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: (uri),
+            language_id: "go".to_string(),
+            version: 1,
+            text: RAW_MAGIT_DIFF_GO.to_string(),
+        },
+    }
+}
+
 }
