@@ -344,13 +344,13 @@ mod tests {
             LspService::new(|client| DiffLsp::new(client, backends, Some(diff), root));
 
         // TODO make relative and include in project.
-        let url = Url::from_file_path("/Users/chrishipple/lsp-example/go-diff.diff-test").unwrap();
+        let url = Url::from_file_path("/Users/chrishipple/lsp-example/main.go").unwrap();
         let hover_request = HoverParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: (TextDocumentIdentifier { uri: url.clone() }),
                 position: Position {
                     line: 18,
-                    character: 14,
+                    character: 5,
                 },
             },
             work_done_progress_params: WorkDoneProgressParams {
@@ -374,7 +374,6 @@ mod tests {
 
         let hover_result = service.inner().hover(hover_request).await.unwrap().unwrap();
         println!("{:?}", hover_result);
-        assert_eq!(1, 2);
     }
     // TODO move to lib.rs but having trouble importing test_data there
     use diff_lsp::DiffHeader;

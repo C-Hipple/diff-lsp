@@ -253,6 +253,7 @@ pub fn read_message<T: BufRead>(reader: &mut T) -> Result<String> {
     reader.read_exact(&mut body_buffer)?;
 
     let body = String::from_utf8(body_buffer)?;
+    // we don't want this for now
     if body.contains("showMessage") || body.contains("logMessage") {
         read_message(reader)
 
