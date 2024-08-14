@@ -59,11 +59,8 @@ async fn main() {
     let root: String = expanduser("~/diff-lsp").unwrap().display().to_string();
     let (diff_lsp_service, socket) = LspService::new(|client| server::DiffLsp::new(client, backends, None, root));
 
-    // Testing to make sure we can properly interface with teh backends
-    // let mut rust_analyzer2 = client::ClientForBackendServer::new("rust-analyzer".to_string());
-    // rust_analyzer2.initialize().unwrap();
     info!("Starting Logger");
 
-    println!("Goodbye world.");
     Server::new(stdin, stdout, socket).serve(diff_lsp_service).await;
+    println!("Goodbye world.");
 }

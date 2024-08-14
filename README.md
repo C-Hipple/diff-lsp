@@ -18,3 +18,9 @@ Allows your editor to use the following lsp capabilities in diffs
 ### Emacs
 
 See [diff-lsp.el](https://www.github.com/C-Hipple/diff-lsp.el) for configuring & running with emacs.
+
+
+## TODO
+
+[ ] config file update
+[ ] it properly starts up when invoked by a "real" client.

@@ -130,12 +130,9 @@ impl LanguageServer for DiffLsp {
         }
 
         Ok(InitializeResult {
-            server_info: None,
+            server_info: Some(ServerInfo { name: "diff-lsp".to_string(), version: Some("0.0.1".to_string())}),
             capabilities: ServerCapabilities {
-                execute_command_provider: Some(ExecuteCommandOptions {
-                    commands: vec!["custom.notification".to_string()],
-                    work_done_progress_options: Default::default(),
-                }),
+                execute_command_provider: None,
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 ..ServerCapabilities::default()
             },
@@ -194,9 +191,18 @@ impl LanguageServer for DiffLsp {
             .line
             .try_into()
             .unwrap();
-        let source_map = self.get_source_map(line).unwrap();
+        let source_map_res = self.get_source_map(line);
+        let source_map = match source_map_res {
+            Some(sm) => sm,
+            None => return Err(Error::new(ErrorCode::ServerError(1)))
+        };
+
         println!("source map: {:?}", source_map);
-        let backend_mutex = self.get_backend(&source_map).unwrap();
+        let backend_mutex_res = self.get_backend(&source_map);
+        let backend_mutex = match backend_mutex_res {
+            Some(bm) => bm,
+            None => return Err(Error::new(ErrorCode::ServerError(1)))
+        };
         let mut backend = backend_mutex.lock().await;
         let mut mapped_params = params.clone();
         let uri = diff_lsp::uri_from_relative_filename(self.root.clone(), &source_map.file_name);
@@ -254,21 +260,21 @@ impl LanguageServer for DiffLsp {
         }
     }
 
-    async fn did_change(&self, _params: DidChangeTextDocumentParams) {
-        println!("Calling did_change")
+    async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        println!("Calling did_change {:?}", params)
     }
 
-    async fn did_close(&self, _params: DidCloseTextDocumentParams) {
-        println!("Calling did_close")
+    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        println!("Calling did_close {:?}", params)
     }
 
-    // async fn references(&self, _params: ReferenceParams) -> Result<Option<Vec<Location>>>{
-    //     unimplemented!("Getting references not yet implemented.")
-    // }
+    async fn references(&self, _params: ReferenceParams) -> Result<Option<Vec<Location>>>{
+        unimplemented!("Getting references not yet implemented.")
+    }
 
-    // async fn goto_definition(&self, _params: GotoDefinitionParams) -> Result<Option<GotoDefinitionResponse>> {
-    //     unimplemented!("goto_definition not yet implemented.")
-    // }
+    async fn goto_definition(&self, _params: GotoDefinitionParams) -> Result<Option<GotoDefinitionResponse>> {
+        unimplemented!("goto_definition not yet implemented.")
+    }
 }
 
 #[cfg(test)]
@@ -300,7 +306,7 @@ mod tests {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: (TextDocumentIdentifier { uri: url.clone() }),
                 position: Position {
-                    line: 19,
+                    line: 17,
                     character: 15,
                 },
             },
@@ -349,7 +355,7 @@ mod tests {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: (TextDocumentIdentifier { uri: url.clone() }),
                 position: Position {
-                    line: 18,
+                    line: 18,  // 0 index but emacs is 1 indexed, subtract 1 to match (inside hover func)
                     character: 5,
                 },
             },

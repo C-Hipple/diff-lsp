@@ -218,7 +218,7 @@ impl MagitDiff {
             if let Some(supported_file_type) = SupportedFileType::from_extension(hunk.file_type()) {
                 return Some(SourceMap{
                     file_name: hunk.filename,
-                    source_line: line_num - hunk.diff_location + hunk.start_new,
+                    source_line: line_num - hunk.diff_location + hunk.start_new - 1,  // LSP is 0 index.  Editors are 1 index.  Subtract 1 so they match
                     file_type: supported_file_type,
                 })
             }
