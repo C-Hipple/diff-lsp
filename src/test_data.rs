@@ -1,5 +1,3 @@
-pub mod test_data {
-
 use tower_lsp::lsp_types::*;
 
 pub const RAW_MAGIT_DIFF_RUST: &str = r#"Project: magit: diff-lsp
@@ -181,6 +179,4 @@ pub fn get_open_params_go(uri: Url) -> tower_lsp::lsp_types::DidOpenTextDocument
             text: RAW_MAGIT_DIFF_GO.to_string(),
         },
     }
-}
-
 }

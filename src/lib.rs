@@ -5,6 +5,10 @@ use url::Url;
 use std::str::FromStr;
 use strum_macros::EnumString;
 
+pub mod client;
+pub mod server;
+mod test_data;
+
 #[derive(Debug, Hash, PartialEq, std::cmp::Eq)]
 pub enum SupportedFileType {
     Rust,

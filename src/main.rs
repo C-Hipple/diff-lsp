@@ -9,9 +9,8 @@ use expanduser::expanduser;
 use log::{info, Level, LevelFilter, Log, Metadata, Record, SetLoggerError};
 use tower_lsp::{LspService, Server};
 
-mod client;
-mod server;
-mod test_data;
+use diff_lsp::server::{get_backends_map, DiffLsp};
+
 
 fn logfile_path() -> PathBuf {
     println!("setting logfile path");
@@ -55,9 +54,9 @@ async fn main() {
 
     let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
     let cwd = current_dir().unwrap();
-    let backends = server::get_backends_map(cwd.to_str().unwrap());
+    let backends = get_backends_map(cwd.to_str().unwrap());
     let root: String = expanduser("~/diff-lsp").unwrap().display().to_string();
-    let (diff_lsp_service, socket) = LspService::new(|client| server::DiffLsp::new(client, backends, None, root));
+    let (diff_lsp_service, socket) = LspService::new(|client| DiffLsp::new(client, backends, None, root));
 
     info!("Starting Logger");
 

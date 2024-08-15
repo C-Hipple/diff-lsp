@@ -1,8 +1,6 @@
-use diff_lsp::SourceMap;
 use serde::{Deserialize, Serialize};
 
 use std::collections::HashMap;
-use std::env;
 use std::fs;
 
 use expanduser::expanduser;
@@ -11,12 +9,12 @@ use serde_json::Value;
 use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
 use tower_lsp::lsp_types::notification::Notification;
 use tower_lsp::lsp_types::*;
-use tower_lsp::LspService;
 use tower_lsp::{Client, LanguageServer};
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+use crate::*;
 use crate::client;
 use crate::SupportedFileType;
 
@@ -66,7 +64,7 @@ pub struct DiffLsp {
     pub client: Client,
     pub backends: HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>>,
     //pub diff:   // Implements the mapping functions too?
-    pub diff: Option<diff_lsp::MagitDiff>,
+    pub diff: Option<MagitDiff>,
     pub root: String, // The project root, without a trailing slash.  ~/diff-lsp for example
 }
 
@@ -74,7 +72,7 @@ impl DiffLsp {
     pub fn new(
         client: Client,
         backends: HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>>,
-        diff: Option<diff_lsp::MagitDiff>,
+        diff: Option<MagitDiff>,
         root: String,
     ) -> Self {
         // Hacky that if diff is None, then we want to read our hardcoded file.
@@ -89,7 +87,7 @@ impl DiffLsp {
 
         // TODO Actually set diff during textDocument/didOpen
         let contents = fs::read_to_string(expanduser("~/test7.diff-test").unwrap()).unwrap();
-        let diff = diff_lsp::MagitDiff::parse(&contents);
+        let diff = MagitDiff::parse(&contents);
 
         DiffLsp {
             client,
@@ -111,7 +109,7 @@ impl DiffLsp {
     }
 
     #[allow(dead_code)]
-    fn set_diff(&mut self, diff: diff_lsp::MagitDiff) {
+    fn set_diff(&mut self, diff: MagitDiff) {
         self.diff = Some(diff)
     }
 }
@@ -205,7 +203,7 @@ impl LanguageServer for DiffLsp {
         };
         let mut backend = backend_mutex.lock().await;
         let mut mapped_params = params.clone();
-        let uri = diff_lsp::uri_from_relative_filename(self.root.clone(), &source_map.file_name);
+        let uri = uri_from_relative_filename(self.root.clone(), &source_map.file_name);
         mapped_params
             .text_document_position_params
             .text_document
@@ -247,7 +245,7 @@ impl LanguageServer for DiffLsp {
                 let text = fs::read_to_string(full_path).unwrap();
 
                 these_params.text_document.uri =
-                    diff_lsp::uri_from_relative_filename(self.root.clone(), &filename);
+                    uri_from_relative_filename(self.root.clone(), &filename);
                 these_params.text_document.text = text;
                 println!(
                     "Calling Did open to {:?} for file {:?}; with text: {:?}",
@@ -283,16 +281,17 @@ mod tests {
     use super::*;
     //use crate::test_data::{self};
     use crate::test_data::*;
-    use diff_lsp::MagitDiff;
+    use tower_lsp::LspService;
+
 
     // #[tokio::test]
     async fn end_to_end_test_rust_analyzer() {
         // Note this test depends on the environment having rust-analyzer installed and on the path.
-        let diff = MagitDiff::parse(test_data::RAW_MAGIT_DIFF_RUST).unwrap();
+        let diff = MagitDiff::parse(RAW_MAGIT_DIFF_RUST).unwrap();
         let root: String = expanduser("~/diff-lsp").unwrap().display().to_string();
 
         assert_eq!(
-            diff.headers.get(&diff_lsp::DiffHeader::Buffer),
+            diff.headers.get(&DiffHeader::Buffer),
             Some(&"diff-lsp".to_string())
         );
 
@@ -342,7 +341,7 @@ mod tests {
         println!("Root is {:?}", root);
 
         assert_eq!(
-            diff.headers.get(&diff_lsp::DiffHeader::Buffer),
+            diff.headers.get(&DiffHeader::Buffer),
             Some(&"lsp-example".to_string())
         );
         let backends = get_backends_map(&root);
@@ -382,7 +381,7 @@ mod tests {
         println!("{:?}", hover_result);
     }
     // TODO move to lib.rs but having trouble importing test_data there
-    use diff_lsp::DiffHeader;
+    use DiffHeader;
     #[test]
     fn test_parse_go_magit_diff() {
         let parsed_diff = MagitDiff::parse(test_data::RAW_MAGIT_DIFF_GO).unwrap();

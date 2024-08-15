@@ -254,7 +254,7 @@ pub fn read_message<T: BufRead>(reader: &mut T) -> Result<String> {
 
     let body = String::from_utf8(body_buffer)?;
     // we don't want this for now
-    if body.contains("showMessage") || body.contains("logMessage") {
+    if body.contains("showMessage") || body.contains("logMessage") || body.contains("publishDiagnostics"){
         read_message(reader)
 
     } else {
