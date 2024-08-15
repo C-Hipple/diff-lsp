@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use std::collections::HashMap;
 use std::fs;
+use log::{info};
 
 use expanduser::expanduser;
 use itertools::Itertools;
@@ -117,20 +118,22 @@ impl DiffLsp {
 #[tower_lsp::async_trait]
 impl LanguageServer for DiffLsp {
     async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
+        info!("Starting initialize");
         for backend_mutex in self.backends.values().into_iter() {
             let mut backend = backend_mutex.lock().await;
-            println!(
+            info!(
                 "Diff LSP doing initialize for backend: {:?}",
                 backend.lsp_command
             );
             let res = backend.initialize().unwrap();
+            //info!("Result for that initialize: {:?}", res);
             return Ok(res);
         }
 
-        Ok(InitializeResult {
+        let res = Ok(InitializeResult {
             server_info: Some(ServerInfo {
                 name: "diff-lsp".to_string(),
-                version: Some("0.0.1".to_string()),
+                version: Some("0.1.0".to_string()),
             }),
             capabilities: ServerCapabilities {
                 execute_command_provider: None,
@@ -138,21 +141,21 @@ impl LanguageServer for DiffLsp {
                 ..ServerCapabilities::default()
             },
             ..Default::default()
-        })
+        });
+        info!("Finished initialize!");
+        res
     }
 
     async fn initialized(&self, _: InitializedParams) {
         for backend_mutex in self.backends.values().into_iter() {
             let mut backend = backend_mutex.lock().await;
-            println!(
+            info!(
                 "Diff LSP doing initialized for backend: {:?}",
                 backend.lsp_command
             );
             backend.initialized();
         }
-        self.client
-            .log_message(MessageType::INFO, "Initialized!")
-            .await;
+        info!("Finished all initialized")
     }
 
     async fn shutdown(&self) -> Result<()> {

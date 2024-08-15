@@ -1,11 +1,12 @@
 use std::env::current_dir;
-use std::fs::{remove_file, OpenOptions};
+use std::fs::{OpenOptions, remove_file};
 use std::io::prelude::*;
 use std::path::PathBuf;
 
 use expanduser::expanduser;
 use log::{info, Level, LevelFilter, Log, Metadata, Record, SetLoggerError};
 use tower_lsp::{LspService, Server};
+use chrono::Local;
 
 use diff_lsp::server::{get_backends_map, DiffLsp};
 
@@ -22,15 +23,25 @@ impl Log for FileLogger {
     }
 
     fn log(&self, record: &Record) {
-        println!("Logging: {}", record.args());
         if self.enabled(record.metadata()) {
-            let mut file = OpenOptions::new()
+            let mut file = match OpenOptions::new()
+                .create(true) // Create the file if it doesn't exist
                 .append(true)
                 .open(logfile_path())
-                .unwrap();
+            {
+                Ok(file) => file,
+                Err(e) => {
+                    eprintln!("Couldn't open log file: {}", e);
+                    return;
+                }
+            };
 
-            if let Err(e) = writeln!(file, "{} - {}", record.level(), record.args()) {
-                eprintln!("Couldn't Write to file {}", e);
+            // Get the current timestamp
+            let now = Local::now();
+            let formatted_time = now.format("%Y-%m-%d %H:%M:%S");
+
+            if let Err(e) = writeln!(file, "{} - {} - {}", formatted_time, record.level(), record.args()) {
+                eprintln!("Couldn't write to log file: {}", e);
             }
         }
     }
@@ -38,6 +49,7 @@ impl Log for FileLogger {
     fn flush(&self) {
         remove_file(logfile_path()).unwrap();
     }
+
 }
 
 static LOGGER: FileLogger = FileLogger;
@@ -48,6 +60,7 @@ pub fn init() -> Result<(), SetLoggerError> {
 
 #[tokio::main]
 async fn main() {
+    let _ = init().unwrap();
     let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
     let cwd = current_dir().unwrap();
     let backends = get_backends_map(cwd.to_str().unwrap());
