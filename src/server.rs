@@ -14,9 +14,9 @@ use tower_lsp::{Client, LanguageServer};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::*;
 use crate::client;
 use crate::SupportedFileType;
+use crate::*;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct CustomNotificationParams {
@@ -128,7 +128,10 @@ impl LanguageServer for DiffLsp {
         }
 
         Ok(InitializeResult {
-            server_info: Some(ServerInfo { name: "diff-lsp".to_string(), version: Some("0.0.1".to_string())}),
+            server_info: Some(ServerInfo {
+                name: "diff-lsp".to_string(),
+                version: Some("0.0.1".to_string()),
+            }),
             capabilities: ServerCapabilities {
                 execute_command_provider: None,
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
@@ -192,14 +195,14 @@ impl LanguageServer for DiffLsp {
         let source_map_res = self.get_source_map(line);
         let source_map = match source_map_res {
             Some(sm) => sm,
-            None => return Err(Error::new(ErrorCode::ServerError(1)))
+            None => return Err(Error::new(ErrorCode::ServerError(1))),
         };
 
         println!("source map: {:?}", source_map);
         let backend_mutex_res = self.get_backend(&source_map);
         let backend_mutex = match backend_mutex_res {
             Some(bm) => bm,
-            None => return Err(Error::new(ErrorCode::ServerError(1)))
+            None => return Err(Error::new(ErrorCode::ServerError(1))),
         };
         let mut backend = backend_mutex.lock().await;
         let mut mapped_params = params.clone();
@@ -266,11 +269,14 @@ impl LanguageServer for DiffLsp {
         println!("Calling did_close {:?}", params)
     }
 
-    async fn references(&self, _params: ReferenceParams) -> Result<Option<Vec<Location>>>{
+    async fn references(&self, _params: ReferenceParams) -> Result<Option<Vec<Location>>> {
         unimplemented!("Getting references not yet implemented.")
     }
 
-    async fn goto_definition(&self, _params: GotoDefinitionParams) -> Result<Option<GotoDefinitionResponse>> {
+    async fn goto_definition(
+        &self,
+        _params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
         unimplemented!("goto_definition not yet implemented.")
     }
 }
@@ -279,12 +285,11 @@ impl LanguageServer for DiffLsp {
 mod tests {
 
     use super::*;
-    //use crate::test_data::{self};
     use crate::test_data::*;
     use tower_lsp::LspService;
 
-
-    // #[tokio::test]
+    //#[tokio::test]
+    #[allow(dead_code)]
     async fn end_to_end_test_rust_analyzer() {
         // Note this test depends on the environment having rust-analyzer installed and on the path.
         let diff = MagitDiff::parse(RAW_MAGIT_DIFF_RUST).unwrap();
@@ -330,7 +335,6 @@ mod tests {
 
         let hover_result = service.inner().hover(hover_request).await.unwrap().unwrap();
         println!("{:?}", hover_result);
-        assert_eq!(1, 2);
     }
 
     #[tokio::test]
@@ -354,7 +358,7 @@ mod tests {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: (TextDocumentIdentifier { uri: url.clone() }),
                 position: Position {
-                    line: 18,  // 0 index but emacs is 1 indexed, subtract 1 to match (inside hover func)
+                    line: 18, // 0 index but emacs is 1 indexed, subtract 1 to match (inside hover func)
                     character: 5,
                 },
             },

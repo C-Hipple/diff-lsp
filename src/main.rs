@@ -1,16 +1,13 @@
+use std::env::current_dir;
 use std::fs::{remove_file, OpenOptions};
 use std::io::prelude::*;
 use std::path::PathBuf;
-use std::env::current_dir;
 
-
-use diff_lsp::SupportedFileType;
 use expanduser::expanduser;
 use log::{info, Level, LevelFilter, Log, Metadata, Record, SetLoggerError};
 use tower_lsp::{LspService, Server};
 
 use diff_lsp::server::{get_backends_map, DiffLsp};
-
 
 fn logfile_path() -> PathBuf {
     println!("setting logfile path");
@@ -51,15 +48,17 @@ pub fn init() -> Result<(), SetLoggerError> {
 
 #[tokio::main]
 async fn main() {
-
     let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
     let cwd = current_dir().unwrap();
     let backends = get_backends_map(cwd.to_str().unwrap());
     let root: String = expanduser("~/diff-lsp").unwrap().display().to_string();
-    let (diff_lsp_service, socket) = LspService::new(|client| DiffLsp::new(client, backends, None, root));
+    let (diff_lsp_service, socket) =
+        LspService::new(|client| DiffLsp::new(client, backends, None, root));
 
     info!("Starting Logger");
 
-    Server::new(stdin, stdout, socket).serve(diff_lsp_service).await;
+    Server::new(stdin, stdout, socket)
+        .serve(diff_lsp_service)
+        .await;
     println!("Goodbye world.");
 }

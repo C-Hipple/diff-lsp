@@ -1,5 +1,6 @@
 use tower_lsp::lsp_types::*;
 
+#[allow(dead_code)]
 pub const RAW_MAGIT_DIFF_RUST: &str = r#"Project: magit: diff-lsp
 Root: /Users/chrishipple/diff-lsp/
 Buffer: diff-lsp
@@ -130,6 +131,7 @@ Recent commits
 c800636 Initial commit
 "#;
 
+#[allow(dead_code)]
 pub fn get_init_params() -> tower_lsp::lsp_types::InitializeParams {
     #[allow(deprecated)] // root_path is deprecated but without it, code doesn't compile? :(
     InitializeParams {
@@ -159,6 +161,7 @@ pub fn get_init_params() -> tower_lsp::lsp_types::InitializeParams {
     }
 }
 
+#[allow(dead_code)]
 pub fn get_open_params_rust(uri: Url) -> tower_lsp::lsp_types::DidOpenTextDocumentParams {
     DidOpenTextDocumentParams {
         text_document: TextDocumentItem {
@@ -170,6 +173,7 @@ pub fn get_open_params_rust(uri: Url) -> tower_lsp::lsp_types::DidOpenTextDocume
     }
 }
 
+#[allow(dead_code)]
 pub fn get_open_params_go(uri: Url) -> tower_lsp::lsp_types::DidOpenTextDocumentParams {
     DidOpenTextDocumentParams {
         text_document: TextDocumentItem {

@@ -1,12 +1,12 @@
 use anyhow::{anyhow, Result};
-use std::io::{BufRead, BufReader, Write, Read};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 
 use std::{
-    process::{Child, Command, Stdio},
     fs::canonicalize,
     //thread::{spawn},
     //path::{PathBuf}, io::Read,
+    process::{Child, Command, Stdio},
 };
 use tower_lsp::lsp_types::*;
 
@@ -65,7 +65,14 @@ impl ClientForBackendServer {
         println!("path: {:?}", self.path.clone());
         let params = InitializeParams {
             process_id: Some(self.process.id()),
-            root_path: Some(self.path.clone().unwrap().into_os_string().into_string().unwrap()),
+            root_path: Some(
+                self.path
+                    .clone()
+                    .unwrap()
+                    .into_os_string()
+                    .into_string()
+                    .unwrap(),
+            ),
             root_uri: None,
             initialization_options: None,
             capabilities: ClientCapabilities {
@@ -84,11 +91,14 @@ impl ClientForBackendServer {
             },
             trace: None,
             workspace_folders: None,
-            client_info: Some(ClientInfo { name: "diff-lsp-client".to_string(), version: Some("0.0.1".to_string()) }),
+            client_info: Some(ClientInfo {
+                name: "diff-lsp-client".to_string(),
+                version: Some("0.0.1".to_string()),
+            }),
             locale: None,
         };
-        let method = "initialize".to_string();  // TODO: Is there an enum for this?
-        // println!("Sending initialize to backend {}", self.lsp_command);
+        let method = "initialize".to_string(); // TODO: Is there an enum for this?
+                                               // println!("Sending initialize to backend {}", self.lsp_command);
         let raw_resp = self.request(method, params).unwrap();
         let resp: InitializeResult = serde_json::from_value(raw_resp).unwrap();
         //println!("We got the response: {resp:?}");
@@ -98,12 +108,15 @@ impl ClientForBackendServer {
 
     pub fn initialized(&mut self) {
         // send the initialized notification
-        let _ = self.notify("initialized".to_string(), InitializedParams{});
+        let _ = self.notify("initialized".to_string(), InitializedParams {});
     }
 
     fn request<P: Serialize>(&mut self, method: String, params: P) -> Result<Value> {
         let ser_params = serde_json::to_value(params).unwrap();
-        println!("Sending request {} to backend {}: {}", method, self.lsp_command, ser_params);
+        println!(
+            "Sending request {} to backend {}: {}",
+            method, self.lsp_command, ser_params
+        );
         let raw_resp = self.send_value_request(ser_params, method, true).unwrap();
         let as_value: Value = serde_json::from_str(&raw_resp).unwrap();
         Ok(as_value.get("result").unwrap().clone())
@@ -112,11 +125,19 @@ impl ClientForBackendServer {
     pub fn notify<P: Serialize>(&mut self, method: String, params: P) {
         // Just like a request, but does not expect a response.
         let ser_params = serde_json::to_value(params).unwrap();
-        println!("Sending notification {} to backend {}", method, self.lsp_command);
+        println!(
+            "Sending notification {} to backend {}",
+            method, self.lsp_command
+        );
         self.send_value_request(ser_params, method, false).unwrap();
     }
 
-    fn send_value_request<P: Serialize>(&mut self, val: P, method: String, check_response: bool) -> Result<String> {
+    fn send_value_request<P: Serialize>(
+        &mut self,
+        val: P,
+        method: String,
+        check_response: bool,
+    ) -> Result<String> {
         let id = self.get_request_id();
         let std_in = self.process.stdin.as_mut().unwrap();
         // Also make the header
@@ -155,7 +176,7 @@ impl ClientForBackendServer {
             // let mut body_buffer = vec![0; 200];
             // let _ = stderr_reader.read(&mut body_buffer);
             // println!("Backend stderr: {:?}", String::from_utf8(body_buffer));
-            return Ok("".to_string())
+            return Ok("".to_string());
         }
 
         let std_out = self.process.stdout.as_mut().unwrap();
@@ -170,11 +191,11 @@ impl ClientForBackendServer {
                 if r.contains("registerCapability") {
                     println!("Got a register response");
                     if let Ok(r) = read_message(&mut stdout_reader) {
-                        return Ok(r)
+                        return Ok(r);
                     }
                 }
                 Ok(r)
-            },
+            }
             Err(e) => {
                 let std_err = self.process.stderr.as_mut().unwrap();
                 let mut stderr_reader = BufReader::new(std_err);
@@ -192,13 +213,16 @@ impl ClientForBackendServer {
 
     pub fn hover(&mut self, params: HoverParams) -> Result<Option<Hover>> {
         println!("Doing hover with teh params: {:?}", params);
-        let res = self.request("textDocument/hover".to_string(), params).unwrap();
+        let res = self
+            .request("textDocument/hover".to_string(), params)
+            .unwrap();
         println!("Got the hover res: {}", res);
         let hover_res: Result<Hover, serde_json::Error> = serde_json::from_value(res);
         match hover_res {
             Ok(parsed_res) => Ok(Some(parsed_res)),
-            Err(_) => Ok(None)
-        }}
+            Err(_) => Ok(None),
+        }
+    }
 }
 
 pub enum LspHeader {
@@ -254,11 +278,13 @@ pub fn read_message<T: BufRead>(reader: &mut T) -> Result<String> {
 
     let body = String::from_utf8(body_buffer)?;
     // we don't want this for now
-    if body.contains("showMessage") || body.contains("logMessage") || body.contains("publishDiagnostics"){
+    if body.contains("showMessage")
+        || body.contains("logMessage")
+        || body.contains("publishDiagnostics")
+    {
         read_message(reader)
-
     } else {
-    // println!("body {}", body);
+        // println!("body {}", body);
         Ok(body)
     }
 }
