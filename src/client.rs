@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
+use log::info;
 
 use std::{
     fs::canonicalize,
@@ -113,13 +114,18 @@ impl ClientForBackendServer {
 
     fn request<P: Serialize>(&mut self, method: String, params: P) -> Result<Value> {
         let ser_params = serde_json::to_value(params).unwrap();
-        println!(
-            "Sending request {} to backend {}: {}",
-            method, self.lsp_command, ser_params
-        );
-        let raw_resp = self.send_value_request(ser_params, method, true).unwrap();
+        // println!(
+        //     "Sending request {} to backend {}: {}",
+        //     method, self.lsp_command, ser_params
+        // );
+        let raw_resp = self.send_value_request(ser_params, method.clone(), true).unwrap();
         let as_value: Value = serde_json::from_str(&raw_resp).unwrap();
-        Ok(as_value.get("result").unwrap().clone())
+        info!("Request result for method: {:?}, {:?}", method, as_value);
+        if let Some(result) = as_value.get("result") {
+            Ok(result.clone())
+        } else {
+            Err()
+        }
     }
 
     pub fn notify<P: Serialize>(&mut self, method: String, params: P) {

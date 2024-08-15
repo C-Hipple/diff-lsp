@@ -64,7 +64,7 @@ async fn main() {
     let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
     let cwd = current_dir().unwrap();
     let backends = get_backends_map(cwd.to_str().unwrap());
-    let root: String = expanduser("~/diff-lsp").unwrap().display().to_string();
+    let root: String = expanduser("~/lsp-example").unwrap().display().to_string();
     let (diff_lsp_service, socket) =
         LspService::new(|client| DiffLsp::new(client, backends, None, root));
 

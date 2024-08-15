@@ -46,7 +46,7 @@ pub fn get_backends_map(
     dir: &str,
 ) -> HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>> {
     //let rust_analyzer = client::ClientForBackendServer::new("rust-analyzer".to_string());
-    // println!("started rust-analyzer.");
+    // info!("started rust-analyzer.");
     let gopls = client::ClientForBackendServer::new("gopls".to_string(), dir);
     // // MAYBE global pylsp :/ ?
     // let pylsp = client::ClientForBackendServer::new("pylsp".to_string());
@@ -87,7 +87,7 @@ impl DiffLsp {
         }
 
         // TODO Actually set diff during textDocument/didOpen
-        let contents = fs::read_to_string(expanduser("~/test7.diff-test").unwrap()).unwrap();
+        let contents = fs::read_to_string(expanduser("~/go-diff.diff-test").unwrap()).unwrap();
         let diff = MagitDiff::parse(&contents);
 
         DiffLsp {
@@ -118,6 +118,7 @@ impl DiffLsp {
 #[tower_lsp::async_trait]
 impl LanguageServer for DiffLsp {
     async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
+        self.client.log_message(MessageType::WARNING, "Starting").await;
         info!("Starting initialize");
         for backend_mutex in self.backends.values().into_iter() {
             let mut backend = backend_mutex.lock().await;
@@ -127,7 +128,7 @@ impl LanguageServer for DiffLsp {
             );
             let res = backend.initialize().unwrap();
             //info!("Result for that initialize: {:?}", res);
-            return Ok(res);
+            //return Ok(res);
         }
 
         let res = Ok(InitializeResult {
@@ -189,6 +190,7 @@ impl LanguageServer for DiffLsp {
         //      contents: HoverContents::Scalar(MarkedString::from_markdown("Hover Text".to_string())),
         //      range: None,
         // };
+        info!("Doing hover: {:?}", params);
         let line: u16 = params
             .text_document_position_params
             .position
@@ -201,7 +203,7 @@ impl LanguageServer for DiffLsp {
             None => return Err(Error::new(ErrorCode::ServerError(1))),
         };
 
-        println!("source map: {:?}", source_map);
+        info!("source map: {:?}", source_map);
         let backend_mutex_res = self.get_backend(&source_map);
         let backend_mutex = match backend_mutex_res {
             Some(bm) => bm,
@@ -215,9 +217,9 @@ impl LanguageServer for DiffLsp {
             .text_document
             .uri = uri;
         mapped_params.text_document_position_params.position.line = source_map.source_line.into();
-        println!("Hover mapped params: {:?}", mapped_params);
+        info!("Hover mapped params: {:?}", mapped_params);
         let hov_res = backend.hover(mapped_params);
-        println!("hov_res: {:?}", hov_res);
+        info!("hov_res: {:?}", hov_res);
         match hov_res {
             Ok(res) => Ok(res),
             Err(_) => Err(Error::new(ErrorCode::ServerError(1))), // Translating Error type
@@ -225,7 +227,8 @@ impl LanguageServer for DiffLsp {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        // println!("Opened document: {:?}", params);  // uncomment to show that we get diff-test as our did open, but we send the real file to the backend
+        // info!("Opened document: {:?}", params);  // uncomment to show that we get diff-test as our did open, but we send the real file to the backend
+        info!("Calling did_open {:?}", params);
         let _real_path = params.text_document.uri.as_str();
         // get all the paths from all the diffs
 
@@ -246,14 +249,14 @@ impl LanguageServer for DiffLsp {
                 let mut these_params = params.clone();
                 // Here we need to break the LSP contract and use the originator's didOpen URI to read the contents of the file.
 
-                println!("filename: {:?}", filename.clone());
+                info!("filename: {:?}", filename.clone());
                 let full_path = self.root.clone() + "/" + &filename;
                 let text = fs::read_to_string(full_path).unwrap();
 
                 these_params.text_document.uri =
                     uri_from_relative_filename(self.root.clone(), &filename);
                 these_params.text_document.text = text;
-                println!(
+                info!(
                     "Calling Did open to {:?} for file {:?}; with text: {:?}",
                     backend.lsp_command,
                     these_params.text_document.uri.as_str(),
@@ -265,22 +268,24 @@ impl LanguageServer for DiffLsp {
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        println!("Calling did_change {:?}", params)
+        info!("Calling did_change {:?}", params)
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        println!("Calling did_close {:?}", params)
+        info!("Calling did_close {:?}", params)
     }
 
     async fn references(&self, _params: ReferenceParams) -> Result<Option<Vec<Location>>> {
-        unimplemented!("Getting references not yet implemented.")
+        info!("Getting references not yet implemented.");
+        Ok(None)
     }
 
     async fn goto_definition(
         &self,
         _params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>> {
-        unimplemented!("goto_definition not yet implemented.")
+        info!("goto_definition not yet implemented.");
+        Ok(None)
     }
 }
 
@@ -328,7 +333,7 @@ mod tests {
             .await
             .unwrap();
 
-        println!("_init_res: {:?}", _init_res);
+        info!("_init_res: {:?}", _init_res);
 
         service.inner().initialized(InitializedParams {}).await;
         service
@@ -337,7 +342,7 @@ mod tests {
             .await;
 
         let hover_result = service.inner().hover(hover_request).await.unwrap().unwrap();
-        println!("{:?}", hover_result);
+        info!("{:?}", hover_result);
     }
 
     #[tokio::test]
@@ -345,7 +350,7 @@ mod tests {
         // Note this test depends on the environment having gopls installed and on the path.
         let diff = MagitDiff::parse(test_data::RAW_MAGIT_DIFF_GO).unwrap();
         let root: String = expanduser("~/lsp-example").unwrap().display().to_string();
-        println!("Root is {:?}", root);
+        info!("Root is {:?}", root);
 
         assert_eq!(
             diff.headers.get(&DiffHeader::Buffer),
@@ -376,7 +381,7 @@ mod tests {
             .await
             .unwrap();
 
-        println!("_init_res: {:?}", _init_res);
+        info!("_init_res: {:?}", _init_res);
 
         service.inner().initialized(InitializedParams {}).await;
         service
@@ -385,7 +390,7 @@ mod tests {
             .await;
 
         let hover_result = service.inner().hover(hover_request).await.unwrap().unwrap();
-        println!("{:?}", hover_result);
+        info!("{:?}", hover_result);
     }
     // TODO move to lib.rs but having trouble importing test_data there
     use DiffHeader;

@@ -1,6 +1,7 @@
 use regex::Regex;
 use std::collections::HashMap;
 use url::Url;
+use log::info;
 
 use std::str::FromStr;
 use strum_macros::EnumString;
@@ -114,6 +115,7 @@ impl Hunk {
 
         // }
         //TODO: More other handling
+        //info!("parsed filetype: {} - {}", wip.file_type(), wip.filename);  // we don't have file_type yet
         Some(wip)
     }
 
@@ -127,6 +129,7 @@ impl Hunk {
 
     pub fn file_type(&self) -> String {
         // better not get any files with "." in them
+        info!("Filename: {}", self.filename);
         self.filename.split_once('.').unwrap().1.to_string()
     }
 }
@@ -182,6 +185,7 @@ impl MagitDiff {
                 // TODO: Handle multiple files
                 if line.starts_with("modified") {
                     current_filename = line.split_whitespace().nth(1).unwrap();
+                    info!("Current filename when parsing: {:?}", current_filename);
                 }
                 if line.starts_with("@@") && !building_hunk {
                     building_hunk = true;
