@@ -126,7 +126,7 @@ impl LanguageServer for DiffLsp {
                 "Diff LSP doing initialize for backend: {:?}",
                 backend.lsp_command
             );
-            let res = backend.initialize().unwrap();
+            backend.initialize().unwrap();
             //info!("Result for that initialize: {:?}", res);
             //return Ok(res);
         }

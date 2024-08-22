@@ -1,12 +1,12 @@
 use std::env::current_dir;
-use std::fs::{OpenOptions, remove_file};
+use std::fs::{remove_file, OpenOptions};
 use std::io::prelude::*;
 use std::path::PathBuf;
 
+use chrono::Local;
 use expanduser::expanduser;
 use log::{info, Level, LevelFilter, Log, Metadata, Record, SetLoggerError};
 use tower_lsp::{LspService, Server};
-use chrono::Local;
 
 use diff_lsp::server::{get_backends_map, DiffLsp};
 
@@ -40,7 +40,13 @@ impl Log for FileLogger {
             let now = Local::now();
             let formatted_time = now.format("%Y-%m-%d %H:%M:%S");
 
-            if let Err(e) = writeln!(file, "{} - {} - {}", formatted_time, record.level(), record.args()) {
+            if let Err(e) = writeln!(
+                file,
+                "{} - {} - {}",
+                formatted_time,
+                record.level(),
+                record.args()
+            ) {
                 eprintln!("Couldn't write to log file: {}", e);
             }
         }
@@ -49,7 +55,6 @@ impl Log for FileLogger {
     fn flush(&self) {
         remove_file(logfile_path()).unwrap();
     }
-
 }
 
 static LOGGER: FileLogger = FileLogger;

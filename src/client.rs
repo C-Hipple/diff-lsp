@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
+use log::info;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
-use log::info;
 
 use std::{
     fs::canonicalize,
@@ -118,13 +118,15 @@ impl ClientForBackendServer {
         //     "Sending request {} to backend {}: {}",
         //     method, self.lsp_command, ser_params
         // );
-        let raw_resp = self.send_value_request(ser_params, method.clone(), true).unwrap();
+        let raw_resp = self
+            .send_value_request(ser_params, method.clone(), true)
+            .unwrap();
         let as_value: Value = serde_json::from_str(&raw_resp).unwrap();
         info!("Request result for method: {:?}, {:?}", method, as_value);
         if let Some(result) = as_value.get("result") {
             Ok(result.clone())
         } else {
-            Err()
+            Err(anyhow!("No value"))
         }
     }
 
@@ -219,14 +221,21 @@ impl ClientForBackendServer {
 
     pub fn hover(&mut self, params: HoverParams) -> Result<Option<Hover>> {
         println!("Doing hover with teh params: {:?}", params);
-        let res = self
-            .request("textDocument/hover".to_string(), params)
-            .unwrap();
-        println!("Got the hover res: {}", res);
-        let hover_res: Result<Hover, serde_json::Error> = serde_json::from_value(res);
-        match hover_res {
-            Ok(parsed_res) => Ok(Some(parsed_res)),
-            Err(_) => Ok(None),
+        let res = self.request("textDocument/hover".to_string(), params);
+        match res {
+            Ok(unwrapped_result) => {
+                let hover_res: Result<Hover, serde_json::Error> =
+                    serde_json::from_value(unwrapped_result);
+                match hover_res {
+                    Ok(parsed_res) => {
+                        info!("Okay on hover return!");
+                        return Ok(Some(parsed_res))
+                    }
+
+                    Err(_) => return Ok(None),
+                }
+            }
+            Err(_) => return Ok(None),
         }
     }
 }
@@ -288,6 +297,7 @@ pub fn read_message<T: BufRead>(reader: &mut T) -> Result<String> {
         || body.contains("logMessage")
         || body.contains("publishDiagnostics")
     {
+        info!("{}", body);
         read_message(reader)
     } else {
         // println!("body {}", body);
