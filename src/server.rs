@@ -90,12 +90,15 @@ impl DiffLsp {
         let contents = fs::read_to_string(expanduser("~/go-diff.diff-test").unwrap()).unwrap();
         let diff = MagitDiff::parse(&contents);
 
-        DiffLsp {
+        let server = DiffLsp {
             client,
             backends,
             diff,
             root,
-        }
+        };
+        info!("Starting server: {:?}", server);
+        server
+
     }
 
     fn get_backend(
