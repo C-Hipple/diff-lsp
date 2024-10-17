@@ -301,7 +301,7 @@ mod tests {
 
     //#[tokio::test]
     #[allow(dead_code)]
-    async fn end_to_end_test_rust_analyzer() {
+    async fn test_end_to_end_rust_analyzer() {
         // Note this test depends on the environment having rust-analyzer installed and on the path.
         let diff = MagitDiff::parse(RAW_MAGIT_DIFF_RUST).unwrap();
         let root: String = expanduser("~/diff-lsp").unwrap().display().to_string();
@@ -349,7 +349,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn end_to_end_test_gopls() {
+    async fn test_end_to_end_gopls() {
         // Note this test depends on the environment having gopls installed and on the path.
         let diff = MagitDiff::parse(test_data::RAW_MAGIT_DIFF_GO).unwrap();
         let root: String = expanduser("~/lsp-example").unwrap().display().to_string();
