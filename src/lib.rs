@@ -49,8 +49,8 @@ pub fn uri_from_relative_filename(project_root: String, rel_filename: &str) -> U
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
-enum LineType {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LineType {
     Added,
     Removed,
     Unmodified,
@@ -140,6 +140,7 @@ pub struct SourceMap {
     pub file_name: String,
     pub source_line: u16,
     pub file_type: SupportedFileType,
+    pub source_line_type: LineType
 }
 
 #[derive(EnumString, Hash, PartialEq, std::cmp::Eq, Debug)]
@@ -224,27 +225,19 @@ impl MagitDiff {
     pub fn map_diff_line_to_src(&self, line_num: u16)  -> Option<SourceMap> {
         if let Some(hunk) = self.get_hunk_by_diff_line_number(line_num) {
             if let Some(supported_file_type) = SupportedFileType::from_extension(hunk.file_type()) {
+                let pos_in_hunk: usize = (line_num - hunk.diff_location).into();
+                info!("map: pos_in_hunk: {:?}", pos_in_hunk);
                 return Some(SourceMap{
                     file_name: hunk.filename,
                     source_line: line_num - hunk.diff_location + hunk.start_new - 1,  // LSP is 0 index.  Editors are 1 index.  Subtract 1 so they match
+
                     file_type: supported_file_type,
+                    source_line_type: hunk.changes[pos_in_hunk].line_type
                 })
             }
         }
         None
     }
-
-    // fn map_diff_line_to_src_number(&self, line_num: u16) -> Option<u16> {
-    //     // Translates a line number on the magit-diff to a line in the source
-    //     // the LSP client will always reference the "diff document" but our backend LSP servers need to know the
-    //     // line number in the original source file.
-    //     for hunk in &self.hunks {
-    //         if line_num > hunk.diff_location && line_num <= hunk.diff_end() {
-    //             return Some(line_num - hunk.diff_location)
-    //         }
-    //     }
-    //     None
-    // }
 
     fn get_hunk_by_diff_line_number(&self, line_num: u16) -> Option<Hunk> {
         for hunk in &self.hunks {
@@ -395,4 +388,22 @@ d083654 more readme
         assert_eq!("file:///Users/chrishipple/diff-lsp/src/main.rs", output.as_str());
     }
 
+    #[test]
+    fn test_source_map() {
+        let diff = MagitDiff::parse(test_data::RAW_MAGIT_DIFF_GO).unwrap();
+
+        let map = diff.map_diff_line_to_src(10);
+        assert!(map.is_none(), "Before hunk starts");
+
+        let map = diff.map_diff_line_to_src(13).unwrap(); // the empty space
+        assert_eq!(map.source_line_type, LineType::Unmodified);
+        assert_eq!(map.source_line, 13); // coincidence that it's the same
+        println!("line_type: {:?}", map.source_line_type);
+
+        let map = diff.map_diff_line_to_src(14).unwrap(); // +var logger
+        assert_eq!(map.source_line, 14); // coincidence that it's the same
+        assert_eq!(map.source_line_type, LineType::Added);
+        println!("line_type: {:?}", map.source_line_type);
+        assert_eq!(map.file_name, String::from("main.go"));
+    }
 }

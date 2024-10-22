@@ -87,7 +87,8 @@ impl DiffLsp {
         }
 
         // TODO Actually set diff during textDocument/didOpen
-        let contents = fs::read_to_string(expanduser("~/go-diff.diff-test").unwrap()).unwrap();
+        //let contents = fs::read_to_string(expanduser("~/go-diff.diff-test").unwrap()).unwrap();
+        let contents = fs::read_to_string(expanduser("~/lsp-example/test6.diff-test").unwrap()).unwrap();
         let diff = MagitDiff::parse(&contents);
 
         let server = DiffLsp {
@@ -213,16 +214,27 @@ impl LanguageServer for DiffLsp {
             None => return Err(Error::new(ErrorCode::ServerError(1))),
         };
         let mut backend = backend_mutex.lock().await;
+        // TODO do all this mapping in an async func since there's a lot of cloning and whatnot and then futures::join! it with the backend_mutex
         let mut mapped_params = params.clone();
         let uri = uri_from_relative_filename(self.root.clone(), &source_map.file_name);
+
         mapped_params
             .text_document_position_params
             .text_document
             .uri = uri;
         mapped_params.text_document_position_params.position.line = source_map.source_line.into();
+
+        if source_map.source_line_type != LineType::Unmodified {
+            // this is a problem for 1 letter variables since emacs won't send the hover request
+            // for whitespace, even if it would get mapped to the correct position
+            // Account for the + or - at the start of the line
+            mapped_params.text_document_position_params.position.character -= 1
+        }
+
+        // Accounting for this elsewhere
+        //mapped_params.text_document_position_params.position.line += 1;  // the lsp client is 0 indexing
         info!("Hover mapped params: {:?}", mapped_params);
         let hov_res = backend.hover(mapped_params);
-        info!("hov_res: {:?}", hov_res);
         match hov_res {
             Ok(res) => Ok(res),
             Err(_) => Err(Error::new(ErrorCode::ServerError(1))), // Translating Error type
