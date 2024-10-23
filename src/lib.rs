@@ -397,13 +397,11 @@ d083654 more readme
 
         let map = diff.map_diff_line_to_src(13).unwrap(); // the empty space
         assert_eq!(map.source_line_type, LineType::Unmodified);
-        assert_eq!(map.source_line, 13); // coincidence that it's the same
-        println!("line_type: {:?}", map.source_line_type);
+        assert_eq!(map.source_line, 12);
 
         let map = diff.map_diff_line_to_src(14).unwrap(); // +var logger
-        assert_eq!(map.source_line, 14); // coincidence that it's the same
+        assert_eq!(map.source_line, 13);
         assert_eq!(map.source_line_type, LineType::Added);
-        println!("line_type: {:?}", map.source_line_type);
         assert_eq!(map.file_name, String::from("main.go"));
     }
 }
