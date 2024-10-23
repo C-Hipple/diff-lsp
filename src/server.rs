@@ -360,7 +360,8 @@ mod tests {
         info!("{:?}", hover_result);
     }
 
-    #[tokio::test]
+    //#[tokio::test]
+    #[allow(dead_code)]
     async fn test_end_to_end_gopls() {
         // Note this test depends on the environment having gopls installed and on the path.
         let diff = MagitDiff::parse(test_data::RAW_MAGIT_DIFF_GO).unwrap();
