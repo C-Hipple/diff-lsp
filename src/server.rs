@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+use log::info;
 use std::collections::HashMap;
 use std::fs;
-use log::{info};
 
 use expanduser::expanduser;
 use itertools::Itertools;
@@ -88,7 +88,8 @@ impl DiffLsp {
 
         // TODO Actually set diff during textDocument/didOpen
         //let contents = fs::read_to_string(expanduser("~/go-diff.diff-test").unwrap()).unwrap();
-        let contents = fs::read_to_string(expanduser("~/lsp-example/test6.diff-test").unwrap()).unwrap();
+        let contents =
+            fs::read_to_string(expanduser("~/lsp-example/test6.diff-test").unwrap()).unwrap();
         let diff = MagitDiff::parse(&contents);
 
         let server = DiffLsp {
@@ -99,7 +100,6 @@ impl DiffLsp {
         };
         info!("Starting server: {:?}", server);
         server
-
     }
 
     fn get_backend(
@@ -109,7 +109,12 @@ impl DiffLsp {
         self.backends.get(&source_map.file_type)
     }
 
-    fn get_source_map(&self, line_num: u16) -> Option<SourceMap> {
+    fn get_source_map(&self, text_params: TextDocumentPositionParams) -> Option<SourceMap> {
+        let line: u16 = text_params.position.line.try_into().unwrap();
+        return self.line_to_source_map(line);
+    }
+
+    fn line_to_source_map(&self, line_num: u16) -> Option<SourceMap> {
         self.diff.as_ref().unwrap().map_diff_line_to_src(line_num)
     }
 
@@ -122,7 +127,9 @@ impl DiffLsp {
 #[tower_lsp::async_trait]
 impl LanguageServer for DiffLsp {
     async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
-        self.client.log_message(MessageType::WARNING, "Starting").await;
+        self.client
+            .log_message(MessageType::WARNING, "Starting")
+            .await;
         info!("Starting initialize");
         for backend_mutex in self.backends.values().into_iter() {
             let mut backend = backend_mutex.lock().await;
@@ -143,15 +150,22 @@ impl LanguageServer for DiffLsp {
             capabilities: ServerCapabilities {
                 execute_command_provider: None,
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                definition_provider: Some(OneOf::Left(true)),
                 ..ServerCapabilities::default()
             },
             ..Default::default()
         });
-        info!("Finished initialize!");
+        info!("Finished initialize! {:?}", res.clone().unwrap());
+        // let init_task = tokio::task::spawn(async {
+        //     tokio::time::sleep(tokio::time::Duration::from_secs(1));
+        //     self.client.send_notification::<Initialized>(InitializedParams{}).await;
+        // }
+        // );
         res
     }
 
     async fn initialized(&self, _: InitializedParams) {
+        info!("Starting Initialized");
         for backend_mutex in self.backends.values().into_iter() {
             let mut backend = backend_mutex.lock().await;
             info!(
@@ -160,7 +174,7 @@ impl LanguageServer for DiffLsp {
             );
             backend.initialized();
         }
-        info!("Finished all initialized")
+        info!("Finished all initialized");
     }
 
     async fn shutdown(&self) -> Result<()> {
@@ -195,13 +209,7 @@ impl LanguageServer for DiffLsp {
         //      range: None,
         // };
         info!("Doing hover: {:?}", params);
-        let line: u16 = params
-            .text_document_position_params
-            .position
-            .line
-            .try_into()
-            .unwrap();
-        let source_map_res = self.get_source_map(line);
+        let source_map_res = self.get_source_map(params.text_document_position_params.clone());
         let source_map = match source_map_res {
             Some(sm) => sm,
             None => return Err(Error::new(ErrorCode::ServerError(1))),
@@ -228,7 +236,10 @@ impl LanguageServer for DiffLsp {
             // this is a problem for 1 letter variables since emacs won't send the hover request
             // for whitespace, even if it would get mapped to the correct position
             // Account for the + or - at the start of the line
-            mapped_params.text_document_position_params.position.character -= 1
+            mapped_params
+                .text_document_position_params
+                .position
+                .character -= 1
         }
 
         // Accounting for this elsewhere
@@ -280,6 +291,8 @@ impl LanguageServer for DiffLsp {
                 backend.did_open(&these_params);
             }
         }
+        info!("Finished did_open");
+        info!("Finished did_open2");
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -299,8 +312,46 @@ impl LanguageServer for DiffLsp {
         &self,
         _params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>> {
-        info!("goto_definition not yet implemented.");
-        Ok(None)
+        //info!("goto_definition not yet implemented.");
+
+        let source_map_res = self.get_source_map(_params.text_document_position_params.clone());
+        let source_map = match source_map_res {
+            Some(sm) => sm,
+            None => return Err(Error::new(ErrorCode::ServerError(1))),
+        };
+
+        let mut mapped_params = _params.clone();
+
+        let backend_mutex_res = self.get_backend(&source_map);
+        let backend_mutex = match backend_mutex_res {
+            Some(bm) => bm,
+            None => return Err(Error::new(ErrorCode::ServerError(1))),
+        };
+
+        let mut backend = backend_mutex.lock().await;
+
+        let uri = uri_from_relative_filename(self.root.clone(), &source_map.file_name);
+
+        mapped_params
+            .text_document_position_params
+            .text_document
+            .uri = uri;
+        mapped_params.text_document_position_params.position.line = source_map.source_line.into();
+
+        if source_map.source_line_type != LineType::Unmodified {
+            // this is a problem for 1 letter variables since emacs won't send the hover request
+            // for whitespace, even if it would get mapped to the correct position
+            // Account for the + or - at the start of the line
+            mapped_params
+                .text_document_position_params
+                .position
+                .character -= 1;
+        }
+        let goto_def_res = backend.goto_definition(&mapped_params);
+        match goto_def_res {
+            Ok(res) => Ok(res),
+            Err(_) => Err(Error::new(ErrorCode::ServerError(1))), // Translating Error type
+        }
     }
 }
 

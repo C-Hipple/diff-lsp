@@ -229,7 +229,31 @@ impl ClientForBackendServer {
                 match hover_res {
                     Ok(parsed_res) => {
                         info!("Okay on hover return!");
-                        return Ok(Some(parsed_res))
+                        return Ok(Some(parsed_res));
+                    }
+
+                    Err(_) => return Ok(None),
+                }
+            }
+            Err(_) => return Ok(None),
+        }
+    }
+
+    pub fn goto_definition(
+        &mut self,
+        params: &GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        info!("Doing goto definition with the params: {:?}", params);
+
+        let res = self.request("textDocument/definition".to_string(), params);
+        match res {
+            Ok(unwrapped_result) => {
+                let definition_res: Result<GotoDefinitionResponse, serde_json::Error> =
+                    serde_json::from_value(unwrapped_result);
+                match definition_res {
+                    Ok(parsed_res) => {
+                        info!("Okay on definition return!");
+                        return Ok(Some(parsed_res));
                     }
 
                     Err(_) => return Ok(None),
