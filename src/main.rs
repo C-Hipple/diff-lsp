@@ -25,7 +25,7 @@ impl Log for FileLogger {
     fn log(&self, record: &Record) {
         if self.enabled(record.metadata()) {
             let mut file = match OpenOptions::new()
-                .create(true) // Create the file if it doesn't exist
+                .create(true)
                 .append(true)
                 .open(logfile_path())
             {
@@ -36,7 +36,6 @@ impl Log for FileLogger {
                 }
             };
 
-            // Get the current timestamp
             let now = Local::now();
             let formatted_time = now.format("%Y-%m-%d %H:%M:%S");
 
@@ -70,7 +69,7 @@ async fn main() {
     let cwd = current_dir().unwrap();
     let backends = get_backends_map(cwd.to_str().unwrap());
     let (diff_lsp_service, socket) =
-        LspService::new(|client| DiffLsp::new(client, backends, None, String::from(cwd.to_str().unwrap())));
+        LspService::new(|client| DiffLsp::new(client, backends, None, None, String::from(cwd.to_str().unwrap())));
 
     info!("Starting server@{:?}", cwd);
 

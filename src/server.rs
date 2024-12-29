@@ -65,7 +65,8 @@ pub struct DiffLsp {
     pub client: Client,
     pub backends: HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>>,
     //pub diff:   // Implements the mapping functions too?
-    pub diff: Option<MagitDiff>,
+    // pub diff: Option<MagitDiff>,
+    pub diff: HashMap<Url, Arc<Mutex<MagitDiff>>>,
     pub root: String, // The project root, without a trailing slash.  ~/diff-lsp for example
 }
 
@@ -74,29 +75,47 @@ impl DiffLsp {
         client: Client,
         backends: HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>>,
         diff: Option<MagitDiff>,
+        diff_path: Option<String>,
         root: String,
     ) -> Self {
         // Hacky that if diff is None, then we want to read our hardcoded file.
         if let Some(my_diff) = diff {
+            // let owned_diff_path: String = diff_path.unwrap().to_owned();
+            let str_diff_path: &str = &diff_path.unwrap()[..];
+            let mut diff_map: HashMap<Url, Arc<Mutex<MagitDiff>>> = HashMap::new();
+            diff_map.insert(
+                Url::from_file_path(str_diff_path).unwrap(),
+                Arc::new(Mutex::new(my_diff)),
+            );
+
             return DiffLsp {
                 client,
                 backends,
-                diff: Some(my_diff),
+                diff: diff_map,
                 root,
             };
         }
 
         // TODO Actually set diff during textDocument/didOpen
         //let contents = fs::read_to_string(expanduser("~/go-diff.diff-test").unwrap()).unwrap();
-        let contents =
-            fs::read_to_string(expanduser("~/lsp-example/test6.diff-test").unwrap()).unwrap();
+
+        let diff_path = expanduser("~/lsp-example/test6.diff-test").unwrap();
+        let contents = fs::read_to_string(diff_path.clone()).unwrap();
         let diff = MagitDiff::parse(&contents);
 
+        // let str_diff_path: &str = &diff_path.to_str().unwrap()[..];
+        let str_diff_path = diff_path.to_str().unwrap();
+        let mut diff_map: HashMap<Url, Arc<Mutex<MagitDiff>>> = HashMap::new();
+        diff_map.insert(
+            Url::from_file_path(str_diff_path).unwrap(),
+            Arc::new(Mutex::new(diff.unwrap())),
+        );
+
         let server = DiffLsp {
-            client,
-            backends,
-            diff,
-            root,
+            client: client,
+            backends: backends,
+            diff: diff_map,
+            root: root,
         };
         info!("Starting server: {:?}", server);
         server
@@ -109,19 +128,30 @@ impl DiffLsp {
         self.backends.get(&source_map.file_type)
     }
 
-    fn get_source_map(&self, text_params: TextDocumentPositionParams) -> Option<SourceMap> {
+    fn get_diff(&self, uri: Url) -> Option<&Arc<Mutex<MagitDiff>>> {
+        self.diff.get(&uri)
+
+        // if let Some(diff_mutex) = self.diff.get(&uri) {
+        //     return diff_mutex.lock().await;
+        // }
+        // None
+    }
+
+    async fn get_source_map(&self, text_params: TextDocumentPositionParams) -> Option<SourceMap> {
         let line: u16 = text_params.position.line.try_into().unwrap();
-        return self.line_to_source_map(line);
+        return self.line_to_source_map(
+            text_params.text_document.uri,
+            line).await;
     }
 
-    fn line_to_source_map(&self, line_num: u16) -> Option<SourceMap> {
-        self.diff.as_ref().unwrap().map_diff_line_to_src(line_num)
+    async fn line_to_source_map(&self, uri: Url, line_num: u16) -> Option<SourceMap> {
+        if let Some(diff_mutex) = self.get_diff(uri) {
+            let diff = diff_mutex.lock().await;
+            return diff.map_diff_line_to_src(line_num)
+        }
+        None
     }
 
-    #[allow(dead_code)]
-    fn set_diff(&mut self, diff: MagitDiff) {
-        self.diff = Some(diff)
-    }
 }
 
 #[tower_lsp::async_trait]
@@ -209,7 +239,7 @@ impl LanguageServer for DiffLsp {
         //      range: None,
         // };
         info!("Doing hover: {:?}", params);
-        let source_map_res = self.get_source_map(params.text_document_position_params.clone());
+        let source_map_res = self.get_source_map(params.text_document_position_params.clone()).await;
         let source_map = match source_map_res {
             Some(sm) => sm,
             None => return Err(Error::new(ErrorCode::ServerError(1))),
@@ -259,7 +289,8 @@ impl LanguageServer for DiffLsp {
         // get all the paths from all the diffs
 
         let mut files = vec![];
-        if let Some(diff) = &self.diff {
+        if let Some(diff_mutex) = self.get_diff(params.text_document.uri.clone()) {
+            let diff = diff_mutex.lock().await;
             for hunk in &diff.hunks {
                 files.push(hunk.filename.clone());
             }
@@ -314,7 +345,7 @@ impl LanguageServer for DiffLsp {
     ) -> Result<Option<GotoDefinitionResponse>> {
         //info!("goto_definition not yet implemented.");
 
-        let source_map_res = self.get_source_map(_params.text_document_position_params.clone());
+        let source_map_res = self.get_source_map(_params.text_document_position_params.clone()).await;
         let source_map = match source_map_res {
             Some(sm) => sm,
             None => return Err(Error::new(ErrorCode::ServerError(1))),
