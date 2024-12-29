@@ -139,19 +139,18 @@ impl DiffLsp {
 
     async fn get_source_map(&self, text_params: TextDocumentPositionParams) -> Option<SourceMap> {
         let line: u16 = text_params.position.line.try_into().unwrap();
-        return self.line_to_source_map(
-            text_params.text_document.uri,
-            line).await;
+        return self
+            .line_to_source_map(text_params.text_document.uri, line)
+            .await;
     }
 
     async fn line_to_source_map(&self, uri: Url, line_num: u16) -> Option<SourceMap> {
         if let Some(diff_mutex) = self.get_diff(uri) {
             let diff = diff_mutex.lock().await;
-            return diff.map_diff_line_to_src(line_num)
+            return diff.map_diff_line_to_src(line_num);
         }
         None
     }
-
 }
 
 #[tower_lsp::async_trait]
@@ -239,7 +238,9 @@ impl LanguageServer for DiffLsp {
         //      range: None,
         // };
         info!("Doing hover: {:?}", params);
-        let source_map_res = self.get_source_map(params.text_document_position_params.clone()).await;
+        let source_map_res = self
+            .get_source_map(params.text_document_position_params.clone())
+            .await;
         let source_map = match source_map_res {
             Some(sm) => sm,
             None => return Err(Error::new(ErrorCode::ServerError(1))),
@@ -345,7 +346,9 @@ impl LanguageServer for DiffLsp {
     ) -> Result<Option<GotoDefinitionResponse>> {
         //info!("goto_definition not yet implemented.");
 
-        let source_map_res = self.get_source_map(_params.text_document_position_params.clone()).await;
+        let source_map_res = self
+            .get_source_map(_params.text_document_position_params.clone())
+            .await;
         let source_map = match source_map_res {
             Some(sm) => sm,
             None => return Err(Error::new(ErrorCode::ServerError(1))),
@@ -394,7 +397,7 @@ mod tests {
     use tower_lsp::LspService;
 
     //#[tokio::test]
-    #[allow(dead_code)]
+    // #[allow(dead_code)]
     async fn test_end_to_end_rust_analyzer() {
         // Note this test depends on the environment having rust-analyzer installed and on the path.
         let diff = MagitDiff::parse(RAW_MAGIT_DIFF_RUST).unwrap();
@@ -407,7 +410,7 @@ mod tests {
 
         let backends = get_backends_map(&root);
         let (service, _socket) =
-            LspService::new(|client| DiffLsp::new(client, backends, Some(diff), root));
+            LspService::new(|client| DiffLsp::new(client, backends, Some(diff), None, root));
 
         // TODO make relative and include in project.
         let url = Url::from_file_path("/Users/chrishipple/test7.diff-test").unwrap();
@@ -456,7 +459,7 @@ mod tests {
         );
         let backends = get_backends_map(&root);
         let (service, _socket) =
-            LspService::new(|client| DiffLsp::new(client, backends, Some(diff), root));
+            LspService::new(|client| DiffLsp::new(client, backends, Some(diff), None, root));
 
         // TODO make relative and include in project.
         let url = Url::from_file_path("/Users/chrishipple/lsp-example/main.go").unwrap();
