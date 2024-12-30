@@ -66,7 +66,7 @@ pub struct DiffLsp {
     pub backends: HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>>,
     //pub diff:   // Implements the mapping functions too?
     // pub diff: Option<MagitDiff>,
-    pub diff: HashMap<Url, Arc<Mutex<MagitDiff>>>,
+    pub diff_map: Mutex<HashMap<Url, MagitDiff>>,
     pub root: String, // The project root, without a trailing slash.  ~/diff-lsp for example
 }
 
@@ -74,49 +74,32 @@ impl DiffLsp {
     pub fn new(
         client: Client,
         backends: HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>>,
-        diff: Option<MagitDiff>,
-        diff_path: Option<String>,
         root: String,
     ) -> Self {
-        // Hacky that if diff is None, then we want to read our hardcoded file.
-        if let Some(my_diff) = diff {
-            // let owned_diff_path: String = diff_path.unwrap().to_owned();
-            let str_diff_path: &str = &diff_path.unwrap()[..];
-            let mut diff_map: HashMap<Url, Arc<Mutex<MagitDiff>>> = HashMap::new();
-            diff_map.insert(
-                Url::from_file_path(str_diff_path).unwrap(),
-                Arc::new(Mutex::new(my_diff)),
-            );
-
-            return DiffLsp {
-                client,
-                backends,
-                diff: diff_map,
-                root,
-            };
-        }
-
-        // TODO Actually set diff during textDocument/didOpen
-        //let contents = fs::read_to_string(expanduser("~/go-diff.diff-test").unwrap()).unwrap();
-
-        let diff_path = expanduser("~/lsp-example/test6.diff-test").unwrap();
-        let contents = fs::read_to_string(diff_path.clone()).unwrap();
-        let diff = MagitDiff::parse(&contents);
-
-        // let str_diff_path: &str = &diff_path.to_str().unwrap()[..];
-        let str_diff_path = diff_path.to_str().unwrap();
-        let mut diff_map: HashMap<Url, Arc<Mutex<MagitDiff>>> = HashMap::new();
-        diff_map.insert(
-            Url::from_file_path(str_diff_path).unwrap(),
-            Arc::new(Mutex::new(diff.unwrap())),
-        );
-
         let server = DiffLsp {
-            client: client,
-            backends: backends,
-            diff: diff_map,
-            root: root,
+            client,
+            backends,
+            diff_map: Mutex::new((|| {
+                // TODO Actually set diff during textDocument/didOpen
+                let mut map: HashMap<Url, MagitDiff> = HashMap::new();
+                let diff_path = expanduser("~/lsp-example/test6.diff-test").unwrap();
+
+                let contents = fs::read_to_string(diff_path.clone()).unwrap();
+                let diff = MagitDiff::parse(&contents);
+
+                let str_diff_path = diff_path.to_str().unwrap();
+                map.insert(Url::from_file_path(str_diff_path).unwrap(), diff.unwrap());
+                map
+            })()),
+            // Lazydiff_map,
+            root,
         };
+
+        // server.diff_map.insert(
+        //     Url::from_file_path(str_diff_path).unwrap(),
+        //     diff.unwrap(),
+        // );
+
         info!("Starting server: {:?}", server);
         server
     }
@@ -128,13 +111,9 @@ impl DiffLsp {
         self.backends.get(&source_map.file_type)
     }
 
-    fn get_diff(&self, uri: Url) -> Option<&Arc<Mutex<MagitDiff>>> {
-        self.diff.get(&uri)
-
-        // if let Some(diff_mutex) = self.diff.get(&uri) {
-        //     return diff_mutex.lock().await;
-        // }
-        // None
+    async fn get_diff(&self, uri: Url) -> Option<MagitDiff> {
+        let map = self.diff_map.lock().await;
+        map.get(&uri).cloned()
     }
 
     async fn get_source_map(&self, text_params: TextDocumentPositionParams) -> Option<SourceMap> {
@@ -145,8 +124,8 @@ impl DiffLsp {
     }
 
     async fn line_to_source_map(&self, uri: Url, line_num: u16) -> Option<SourceMap> {
-        if let Some(diff_mutex) = self.get_diff(uri) {
-            let diff = diff_mutex.lock().await;
+        if let Some(diff) = self.get_diff(uri).await {
+            // let diff = diff_mutex.lock().await;
             return diff.map_diff_line_to_src(line_num);
         }
         None
@@ -290,11 +269,17 @@ impl LanguageServer for DiffLsp {
         // get all the paths from all the diffs
 
         let mut files = vec![];
-        if let Some(diff_mutex) = self.get_diff(params.text_document.uri.clone()) {
-            let diff = diff_mutex.lock().await;
+        if let Some(diff) = self.get_diff(params.text_document.uri.clone()).await {
             for hunk in &diff.hunks {
                 files.push(hunk.filename.clone());
             }
+        } else {
+            let contents = fs::read_to_string(_real_path).unwrap();
+            let diff = MagitDiff::parse(&contents);
+            self.diff_map
+                .lock()
+                .await
+                .insert(params.text_document.uri.clone(), diff.unwrap());
         }
 
         // not sure how to type hint the Vec<String> doing this in the loop constructor
@@ -397,7 +382,7 @@ mod tests {
     use tower_lsp::LspService;
 
     //#[tokio::test]
-    // #[allow(dead_code)]
+    #[allow(dead_code)]
     async fn test_end_to_end_rust_analyzer() {
         // Note this test depends on the environment having rust-analyzer installed and on the path.
         let diff = MagitDiff::parse(RAW_MAGIT_DIFF_RUST).unwrap();
@@ -410,7 +395,8 @@ mod tests {
 
         let backends = get_backends_map(&root);
         let (service, _socket) =
-            LspService::new(|client| DiffLsp::new(client, backends, Some(diff), None, root));
+            // TODO: This no longer sets the diff to RAW_MAGIT_DIFF_RUST
+            LspService::new(|client| DiffLsp::new(client, backends, root));
 
         // TODO make relative and include in project.
         let url = Url::from_file_path("/Users/chrishipple/test7.diff-test").unwrap();
@@ -459,7 +445,8 @@ mod tests {
         );
         let backends = get_backends_map(&root);
         let (service, _socket) =
-            LspService::new(|client| DiffLsp::new(client, backends, Some(diff), None, root));
+            // TODO: This no longer sets the diff to raw go diff
+            LspService::new(|client| DiffLsp::new(client, backends, root));
 
         // TODO make relative and include in project.
         let url = Url::from_file_path("/Users/chrishipple/lsp-example/main.go").unwrap();

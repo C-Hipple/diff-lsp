@@ -69,7 +69,7 @@ async fn main() {
     let cwd = current_dir().unwrap();
     let backends = get_backends_map(cwd.to_str().unwrap());
     let (diff_lsp_service, socket) =
-        LspService::new(|client| DiffLsp::new(client, backends, None, None, String::from(cwd.to_str().unwrap())));
+        LspService::new(|client| DiffLsp::new(client, backends, String::from(cwd.to_str().unwrap())));
 
     info!("Starting server@{:?}", cwd);
 

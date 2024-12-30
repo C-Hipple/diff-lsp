@@ -143,7 +143,7 @@ pub struct SourceMap {
     pub source_line_type: LineType
 }
 
-#[derive(EnumString, Hash, PartialEq, std::cmp::Eq, Debug)]
+#[derive(EnumString, Hash, PartialEq, std::cmp::Eq, Debug, Clone)]
 pub enum DiffHeader {
     Project,
     Root,
@@ -155,7 +155,7 @@ pub enum DiffHeader {
 }
 
 #[allow(dead_code)]
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct MagitDiff {
     pub headers: HashMap<DiffHeader, String>,
     pub hunks: Vec<Hunk>,
