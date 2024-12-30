@@ -65,7 +65,8 @@ pub struct DiffLsp {
     pub client: Client,
     pub backends: HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>>,
     //pub diff:   // Implements the mapping functions too?
-    pub diff: Option<MagitDiff>,
+    // pub diff: Option<MagitDiff>,
+    pub diff_map: Mutex<HashMap<Url, MagitDiff>>,
     pub root: String, // The project root, without a trailing slash.  ~/diff-lsp for example
 }
 
@@ -73,31 +74,32 @@ impl DiffLsp {
     pub fn new(
         client: Client,
         backends: HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>>,
-        diff: Option<MagitDiff>,
         root: String,
     ) -> Self {
-        // Hacky that if diff is None, then we want to read our hardcoded file.
-        if let Some(my_diff) = diff {
-            return DiffLsp {
-                client,
-                backends,
-                diff: Some(my_diff),
-                root,
-            };
-        }
-
-        // TODO Actually set diff during textDocument/didOpen
-        //let contents = fs::read_to_string(expanduser("~/go-diff.diff-test").unwrap()).unwrap();
-        let contents =
-            fs::read_to_string(expanduser("~/lsp-example/test6.diff-test").unwrap()).unwrap();
-        let diff = MagitDiff::parse(&contents);
-
         let server = DiffLsp {
             client,
             backends,
-            diff,
+            diff_map: Mutex::new((|| {
+                // TODO Actually set diff during textDocument/didOpen
+                let mut map: HashMap<Url, MagitDiff> = HashMap::new();
+                let diff_path = expanduser("~/lsp-example/test6.diff-test").unwrap();
+
+                let contents = fs::read_to_string(diff_path.clone()).unwrap();
+                let diff = MagitDiff::parse(&contents);
+
+                let str_diff_path = diff_path.to_str().unwrap();
+                map.insert(Url::from_file_path(str_diff_path).unwrap(), diff.unwrap());
+                map
+            })()),
+            // Lazydiff_map,
             root,
         };
+
+        // server.diff_map.insert(
+        //     Url::from_file_path(str_diff_path).unwrap(),
+        //     diff.unwrap(),
+        // );
+
         info!("Starting server: {:?}", server);
         server
     }
@@ -109,18 +111,24 @@ impl DiffLsp {
         self.backends.get(&source_map.file_type)
     }
 
-    fn get_source_map(&self, text_params: TextDocumentPositionParams) -> Option<SourceMap> {
+    async fn get_diff(&self, uri: Url) -> Option<MagitDiff> {
+        let map = self.diff_map.lock().await;
+        map.get(&uri).cloned()
+    }
+
+    async fn get_source_map(&self, text_params: TextDocumentPositionParams) -> Option<SourceMap> {
         let line: u16 = text_params.position.line.try_into().unwrap();
-        return self.line_to_source_map(line);
+        return self
+            .line_to_source_map(text_params.text_document.uri, line)
+            .await;
     }
 
-    fn line_to_source_map(&self, line_num: u16) -> Option<SourceMap> {
-        self.diff.as_ref().unwrap().map_diff_line_to_src(line_num)
-    }
-
-    #[allow(dead_code)]
-    fn set_diff(&mut self, diff: MagitDiff) {
-        self.diff = Some(diff)
+    async fn line_to_source_map(&self, uri: Url, line_num: u16) -> Option<SourceMap> {
+        if let Some(diff) = self.get_diff(uri).await {
+            // let diff = diff_mutex.lock().await;
+            return diff.map_diff_line_to_src(line_num);
+        }
+        None
     }
 }
 
@@ -209,7 +217,9 @@ impl LanguageServer for DiffLsp {
         //      range: None,
         // };
         info!("Doing hover: {:?}", params);
-        let source_map_res = self.get_source_map(params.text_document_position_params.clone());
+        let source_map_res = self
+            .get_source_map(params.text_document_position_params.clone())
+            .await;
         let source_map = match source_map_res {
             Some(sm) => sm,
             None => return Err(Error::new(ErrorCode::ServerError(1))),
@@ -259,10 +269,17 @@ impl LanguageServer for DiffLsp {
         // get all the paths from all the diffs
 
         let mut files = vec![];
-        if let Some(diff) = &self.diff {
+        if let Some(diff) = self.get_diff(params.text_document.uri.clone()).await {
             for hunk in &diff.hunks {
                 files.push(hunk.filename.clone());
             }
+        } else {
+            let contents = fs::read_to_string(_real_path).unwrap();
+            let diff = MagitDiff::parse(&contents);
+            self.diff_map
+                .lock()
+                .await
+                .insert(params.text_document.uri.clone(), diff.unwrap());
         }
 
         // not sure how to type hint the Vec<String> doing this in the loop constructor
@@ -314,7 +331,9 @@ impl LanguageServer for DiffLsp {
     ) -> Result<Option<GotoDefinitionResponse>> {
         //info!("goto_definition not yet implemented.");
 
-        let source_map_res = self.get_source_map(_params.text_document_position_params.clone());
+        let source_map_res = self
+            .get_source_map(_params.text_document_position_params.clone())
+            .await;
         let source_map = match source_map_res {
             Some(sm) => sm,
             None => return Err(Error::new(ErrorCode::ServerError(1))),
@@ -376,7 +395,8 @@ mod tests {
 
         let backends = get_backends_map(&root);
         let (service, _socket) =
-            LspService::new(|client| DiffLsp::new(client, backends, Some(diff), root));
+            // TODO: This no longer sets the diff to RAW_MAGIT_DIFF_RUST
+            LspService::new(|client| DiffLsp::new(client, backends, root));
 
         // TODO make relative and include in project.
         let url = Url::from_file_path("/Users/chrishipple/test7.diff-test").unwrap();
@@ -425,7 +445,8 @@ mod tests {
         );
         let backends = get_backends_map(&root);
         let (service, _socket) =
-            LspService::new(|client| DiffLsp::new(client, backends, Some(diff), root));
+            // TODO: This no longer sets the diff to raw go diff
+            LspService::new(|client| DiffLsp::new(client, backends, root));
 
         // TODO make relative and include in project.
         let url = Url::from_file_path("/Users/chrishipple/lsp-example/main.go").unwrap();
