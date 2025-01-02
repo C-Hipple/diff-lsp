@@ -113,7 +113,12 @@ impl DiffLsp {
 
     async fn get_diff(&self, uri: Url) -> Option<MagitDiff> {
         let map = self.diff_map.lock().await;
-        map.get(&uri).cloned()
+        let res = map.get(&uri).cloned();
+        // info!("Searched for the diff via {:?}, got {:?}",
+        //     uri.as_str(),
+        //     res
+        // );
+        res
     }
 
     async fn get_source_map(&self, text_params: TextDocumentPositionParams) -> Option<SourceMap> {
@@ -125,7 +130,6 @@ impl DiffLsp {
 
     async fn line_to_source_map(&self, uri: Url, line_num: u16) -> Option<SourceMap> {
         if let Some(diff) = self.get_diff(uri).await {
-            // let diff = diff_mutex.lock().await;
             return diff.map_diff_line_to_src(line_num);
         }
         None
@@ -268,26 +272,30 @@ impl LanguageServer for DiffLsp {
         let _real_path = params.text_document.uri.as_str();
         // get all the paths from all the diffs
 
-        let mut files = vec![];
-        if let Some(diff) = self.get_diff(params.text_document.uri.clone()).await {
-            for hunk in &diff.hunks {
-                files.push(hunk.filename.clone());
-            }
-        } else {
-            let contents = fs::read_to_string(_real_path).unwrap();
-            let diff = MagitDiff::parse(&contents);
-            self.diff_map
-                .lock()
-                .await
-                .insert(params.text_document.uri.clone(), diff.unwrap());
+        let contents = fs::read_to_string(_real_path).unwrap();
+        let diff = MagitDiff::parse(&contents).unwrap();
+
+        let mut files = vec![]; // Use the filenames to only send the file(s) of the changed files to their respective LSPs.
+        for hunk in &diff.hunks {
+            files.push(hunk.filename.clone());
         }
+
+        self.diff_map
+            .lock()
+            .await
+            .insert(params.text_document.uri.clone(), diff);
 
         // not sure how to type hint the Vec<String> doing this in the loop constructor
         let filtered_files: Vec<String> = files.into_iter().unique().collect();
         // TODO filter by filetype?
         for filename in filtered_files {
-            let filetype = SupportedFileType::from_filename(filename.clone()).unwrap();
-            if let Some(backend_mutex) = self.backends.get(&filetype) {
+            let filetype = SupportedFileType::from_filename(filename.clone());
+
+            if let None = filetype {
+                continue;
+            }
+
+            if let Some(backend_mutex) = self.backends.get(&filetype.unwrap()) {
                 let mut backend = backend_mutex.lock().await;
                 let mut these_params = params.clone();
                 // Here we need to break the LSP contract and use the originator's didOpen URI to read the contents of the file.
@@ -309,7 +317,6 @@ impl LanguageServer for DiffLsp {
             }
         }
         info!("Finished did_open");
-        info!("Finished did_open2");
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
