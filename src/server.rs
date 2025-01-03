@@ -65,8 +65,8 @@ pub struct DiffLsp {
     pub client: Client,
     pub backends: HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>>,
     //pub diff:   // Implements the mapping functions too?
-    // pub diff: Option<MagitDiff>,
-    pub diff_map: Mutex<HashMap<Url, MagitDiff>>,
+    // pub diff: Option<ParsedDiff>,
+    pub diff_map: Mutex<HashMap<Url, ParsedDiff>>,
     pub root: String, // The project root, without a trailing slash.  ~/diff-lsp for example
 }
 
@@ -81,12 +81,11 @@ impl DiffLsp {
             backends,
             diff_map: Mutex::new((|| {
                 // TODO Actually set diff during textDocument/didOpen
-                let mut map: HashMap<Url, MagitDiff> = HashMap::new();
+                let mut map: HashMap<Url, ParsedDiff> = HashMap::new();
                 let diff_path = expanduser("~/lsp-example/test6.diff-test").unwrap();
 
                 let contents = fs::read_to_string(diff_path.clone()).unwrap();
-                let diff = MagitDiff::parse(&contents);
-
+                let diff = MagitDiff::parse(&contents); // TODO determine type from contents
                 let str_diff_path = diff_path.to_str().unwrap();
                 map.insert(Url::from_file_path(str_diff_path).unwrap(), diff.unwrap());
                 map
@@ -111,7 +110,7 @@ impl DiffLsp {
         self.backends.get(&source_map.file_type)
     }
 
-    async fn get_diff(&self, uri: Url) -> Option<MagitDiff> {
+    async fn get_diff(&self, uri: Url) -> Option<ParsedDiff> {
         let map = self.diff_map.lock().await;
         let res = map.get(&uri).cloned();
         // info!("Searched for the diff via {:?}, got {:?}",

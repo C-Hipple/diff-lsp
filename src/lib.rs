@@ -17,8 +17,6 @@ pub enum SupportedFileType {
     Python,
 }
 
-// TODO this feels clunky
-
 impl SupportedFileType {
     pub fn from_extension(extension: String) -> Option<SupportedFileType> {
         match extension.as_str() {
@@ -154,16 +152,70 @@ pub enum DiffHeader {
     Push,
 }
 
+pub trait Parsable {
+    fn parse(source: &str) -> Option<ParsedDiff>;
+}
+
+#[allow(dead_code)]
+#[derive(Default, Debug, Clone)]
+pub struct ParsedDiff {
+    pub headers: HashMap<DiffHeader, String>,
+    pub hunks: Vec<Hunk>,
+}
+
+impl ParsedDiff {
+    pub fn map_diff_line_to_src(&self, line_num: u16)  -> Option<SourceMap> {
+        if let Some(hunk) = self.get_hunk_by_diff_line_number(line_num) {
+            if let Some(supported_file_type) = SupportedFileType::from_extension(hunk.file_type()) {
+                let pos_in_hunk: usize = (line_num - hunk.diff_location).into();
+                info!("map: pos_in_hunk: {:?}", pos_in_hunk);
+                return Some(SourceMap{
+                    file_name: hunk.filename,
+                    source_line: line_num - hunk.diff_location + hunk.start_new - 1,  // LSP is 0 index.  Editors are 1 index.  Subtract 1 so they match
+
+                    file_type: supported_file_type,
+                    source_line_type: hunk.changes[pos_in_hunk].line_type
+                })
+            }
+        }
+        None
+    }
+
+    fn get_hunk_by_diff_line_number(&self, line_num: u16) -> Option<Hunk> {
+        for hunk in &self.hunks {
+            if line_num > hunk.diff_location && line_num <= hunk.diff_end() {
+                return Some(hunk.clone())  // is this going to shoot me in the foot?
+            }
+        }
+        None
+    }
+}
+
+
 #[allow(dead_code)]
 #[derive(Default, Debug, Clone)]
 pub struct MagitDiff {
     pub headers: HashMap<DiffHeader, String>,
     pub hunks: Vec<Hunk>,
+    src: String,
+}
+
+impl Parsable for MagitDiff {
+    fn parse(source: &str) -> Option<ParsedDiff> {
+        if let Some(magit_diff) = MagitDiff::self_parse(source) {
+            return Some(ParsedDiff{
+                headers: magit_diff.headers,
+                hunks: magit_diff.hunks
+            })
+        }
+        None
+    }
+
 }
 
 #[allow(dead_code)]
 impl MagitDiff {
-    pub fn parse(source: &str) -> Option<Self> {
+    fn self_parse(source: &str) -> Option<Self> {
         let mut diff = MagitDiff::default();
 
         let mut found_headers = false;
@@ -221,33 +273,8 @@ impl MagitDiff {
         }
         Some(diff)
     }
-
-    pub fn map_diff_line_to_src(&self, line_num: u16)  -> Option<SourceMap> {
-        if let Some(hunk) = self.get_hunk_by_diff_line_number(line_num) {
-            if let Some(supported_file_type) = SupportedFileType::from_extension(hunk.file_type()) {
-                let pos_in_hunk: usize = (line_num - hunk.diff_location).into();
-                info!("map: pos_in_hunk: {:?}", pos_in_hunk);
-                return Some(SourceMap{
-                    file_name: hunk.filename,
-                    source_line: line_num - hunk.diff_location + hunk.start_new - 1,  // LSP is 0 index.  Editors are 1 index.  Subtract 1 so they match
-
-                    file_type: supported_file_type,
-                    source_line_type: hunk.changes[pos_in_hunk].line_type
-                })
-            }
-        }
-        None
-    }
-
-    fn get_hunk_by_diff_line_number(&self, line_num: u16) -> Option<Hunk> {
-        for hunk in &self.hunks {
-            if line_num > hunk.diff_location && line_num <= hunk.diff_end() {
-                return Some(hunk.clone())  // is this going to shoot me in the foot?
-            }
-        }
-        None
-    }
 }
+
 
 
 #[cfg(test)]
@@ -403,5 +430,15 @@ d083654 more readme
         assert_eq!(map.source_line, 13);
         assert_eq!(map.source_line_type, LineType::Added);
         assert_eq!(map.file_name, String::from("main.go"));
+    }
+
+    #[test]
+    fn test_parse_code_review() {
+        let diff = MagitDiff::parse(test_data::RAW_CODE_REVIEW_DIFF_GO).unwrap();
+
+        assert_eq!(
+            diff.headers.get(&DiffHeader::Project),
+            Some(&"*Code Review*".to_string())
+        );
     }
 }

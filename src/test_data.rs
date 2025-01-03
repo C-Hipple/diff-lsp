@@ -131,6 +131,75 @@ Recent commits
 c800636 Initial commit
 "#;
 
+
+pub const RAW_CODE_REVIEW_DIFF_GO: &str = r#"Project: *Code Review*
+Root: /Users/rain/diff-lsp/
+Buffer: diff-lsp
+Type: magit-status
+Author:          @C-Hipple
+Title:           dev: Handle
+State:           OPEN
+Refs:            main ... dev/example-pr
+Milestone:       No milestone
+Labels:          None yet
+Projects:        None yet
+Draft:           false
+Assignees:       No one — Assign yourself
+Suggested-Reviewers: No suggestions
+Reviewers:
+
+Commits (1)
+0caaec7 different error handler & silly change in main.go
+
+Description
+
+   Section 1
+
+   This PR is for testing code-review PR body parsing.
+
+   Section 2
+
+   Adds some silly changes in mlutple go files
+
+
+Your Review Feedback
+Leave a comment here.
+
+Conversation
+No conversation found.
+
+Files changed (2 files; 10 additions, 1 deletions)
+
+modified   components/hover.go
+@@ -14,7 +14,10 @@ func Hover(ctx context.Context, req *defines.HoverParams) (result *defines.Hover
+    parsed, _ := url.ParseRequestURI(string(req.TextDocument.Uri))
+    data, err := os.ReadFile(parsed.Path)
+    if err != nil {
+-		return nil, err
++		res := &defines.Hover{
++			Contents: "Unable to open file",
++		}
++		return res, nil
+    }
+
+    lines := strings.Split(string(data), "\n")
+
+modified   main.go
+@@ -32,6 +32,12 @@ func init() {
+    if _, err := os.Stat(p); err == nil {
+        os.Rename(p, p+".bak")
+    }
++
++	if _, err := os.Stat(p); err == nil {
++		os.Rename(p, p+".bak")
++	}
++
++
+    f, err := os.Create(p)
+    if err == nil {
+        logger = log.New(f, "", 0)
+"#;
+
 #[allow(dead_code)]
 pub fn get_init_params() -> tower_lsp::lsp_types::InitializeParams {
     #[allow(deprecated)] // root_path is deprecated but without it, code doesn't compile? :(
