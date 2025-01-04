@@ -11,9 +11,12 @@ Allows your editor to use the following lsp capabilities in diffs
 - Hover
 - TODO Jump Definition
 
-## Usage
-
 `diff-lsp` follows the standard language-server protocol, so you can configure your clients to use this LSP server and it should *just work* (lol)
+
+See [Documentation](https://diff-lsp.readthedocs.io/en/latest/) for full docs
+
+## Quickstart
+
 
 ### Emacs
 

@@ -5,6 +5,7 @@
    usage
    installation
    configuration
+   editors
 
    Diff LSP
 =====================================
