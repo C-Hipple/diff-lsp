@@ -1,3 +1,5 @@
+.. title:: Installation
+
 Currently no prebuilt binaries for diff-lsp are provided.  You must built from source.
 
 ```bash

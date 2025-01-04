@@ -1,3 +1,4 @@
+.. title:: Diff LSP
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
