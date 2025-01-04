@@ -132,6 +132,7 @@ c800636 Initial commit
 "#;
 
 
+#[allow(dead_code)]
 pub const RAW_CODE_REVIEW_DIFF_GO: &str = r#"Project: *Code Review*
 Root: /Users/rain/diff-lsp/
 Buffer: diff-lsp

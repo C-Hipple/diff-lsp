@@ -1,7 +1,7 @@
+use log::info;
 use regex::Regex;
 use std::collections::HashMap;
 use url::Url;
-use log::info;
 
 use std::str::FromStr;
 use strum_macros::EnumString;
@@ -23,14 +23,13 @@ impl SupportedFileType {
             "rs" => Some(SupportedFileType::Rust),
             "go" => Some(SupportedFileType::Go),
             "py" => Some(SupportedFileType::Python),
-            _    => None
+            _ => None,
         }
     }
 
     pub fn from_filename(filename: String) -> Option<SupportedFileType> {
         SupportedFileType::from_extension(filename.split_once('.').unwrap().1.to_string())
     }
-
 }
 
 pub fn get_lsp_for_file_type(file_type: SupportedFileType) -> Option<String> {
@@ -72,7 +71,6 @@ pub struct DiffLine {
     line: String,
 }
 
-
 #[allow(dead_code)]
 #[derive(Default, Clone, Debug)]
 pub struct Hunk {
@@ -86,11 +84,12 @@ pub struct Hunk {
 }
 
 impl Hunk {
-    pub fn parse(source: &str) -> Option<Hunk> {
-        // println!("Parsing the hunk from lines:");
-        // println!("{}", source);
+    pub fn parse(source: &str, filename: String) -> Option<Hunk> {
+        println!("Parsing the hunk from lines for the file {}:", filename);
+        println!("{}", source);
         let mut found_header = false;
         let mut wip = Hunk::default();
+        wip.filename = filename;
         for line in source.lines() {
             let re = Regex::new(r"@@ -(\d+),(\d+) \+(\d+),(\d+) @@").unwrap();
             if let Some(caps) = re.captures(line) {
@@ -138,7 +137,7 @@ pub struct SourceMap {
     pub file_name: String,
     pub source_line: u16,
     pub file_type: SupportedFileType,
-    pub source_line_type: LineType
+    pub source_line_type: LineType,
 }
 
 #[derive(EnumString, Hash, PartialEq, std::cmp::Eq, Debug, Clone)]
@@ -164,18 +163,18 @@ pub struct ParsedDiff {
 }
 
 impl ParsedDiff {
-    pub fn map_diff_line_to_src(&self, line_num: u16)  -> Option<SourceMap> {
+    pub fn map_diff_line_to_src(&self, line_num: u16) -> Option<SourceMap> {
         if let Some(hunk) = self.get_hunk_by_diff_line_number(line_num) {
             if let Some(supported_file_type) = SupportedFileType::from_extension(hunk.file_type()) {
                 let pos_in_hunk: usize = (line_num - hunk.diff_location).into();
                 info!("map: pos_in_hunk: {:?}", pos_in_hunk);
-                return Some(SourceMap{
+                return Some(SourceMap {
                     file_name: hunk.filename,
-                    source_line: line_num - hunk.diff_location + hunk.start_new - 1,  // LSP is 0 index.  Editors are 1 index.  Subtract 1 so they match
+                    source_line: line_num - hunk.diff_location + hunk.start_new - 1, // LSP is 0 index.  Editors are 1 index.  Subtract 1 so they match
 
                     file_type: supported_file_type,
-                    source_line_type: hunk.changes[pos_in_hunk].line_type
-                })
+                    source_line_type: hunk.changes[pos_in_hunk].line_type,
+                });
             }
         }
         None
@@ -184,13 +183,12 @@ impl ParsedDiff {
     fn get_hunk_by_diff_line_number(&self, line_num: u16) -> Option<Hunk> {
         for hunk in &self.hunks {
             if line_num > hunk.diff_location && line_num <= hunk.diff_end() {
-                return Some(hunk.clone())  // is this going to shoot me in the foot?
+                return Some(hunk.clone()); // is this going to shoot me in the foot?
             }
         }
         None
     }
 }
-
 
 #[allow(dead_code)]
 #[derive(Default, Debug, Clone)]
@@ -203,14 +201,13 @@ pub struct MagitDiff {
 impl Parsable for MagitDiff {
     fn parse(source: &str) -> Option<ParsedDiff> {
         if let Some(magit_diff) = MagitDiff::self_parse(source) {
-            return Some(ParsedDiff{
+            return Some(ParsedDiff {
                 headers: magit_diff.headers,
-                hunks: magit_diff.hunks
-            })
+                hunks: magit_diff.hunks,
+            });
         }
         None
     }
-
 }
 
 #[allow(dead_code)]
@@ -222,14 +219,19 @@ impl MagitDiff {
         let mut current_filename = "";
         let mut building_hunk = false;
         let mut hunk_lines: Vec<&str> = vec![];
-        let mut offset = 0;
+        let mut hunk_start = 0;
 
         for (i, line) in source.lines().enumerate() {
             if !found_headers {
                 let re = Regex::new(r"(\w+):\s+(.+)").unwrap();
                 if let Some(caps) = re.captures(line) {
-                    let header = DiffHeader::from_str(&caps[1]).unwrap();
-                    diff.headers.insert(header, caps[2].to_string());
+                    println!("{}", line);
+                    match DiffHeader::from_str(&caps[1]) {
+                        Ok(v) => {
+                            diff.headers.insert(v, caps[2].to_string());
+                        }
+                        Err(_) => continue,
+                    }
                 } else {
                     found_headers = true;
                 }
@@ -242,40 +244,50 @@ impl MagitDiff {
                 }
                 if line.starts_with("@@") && !building_hunk {
                     building_hunk = true;
+                    hunk_start = i + 1; // diff_location doesn't include the @@ line
+                    println!("Adding line `{}`", line);
                     hunk_lines.push(line);
                     continue;
                 }
                 if (line.starts_with("@@") && building_hunk) || line.starts_with("Recent commits") {
-                    if line.starts_with("Recent commits") {
-                        // magit puts an empty line between the last diff and "Recent Commits"
-                        // and that's our only way to know that we're out of the hunk
-                        // since a hunk could have an empty line.
-                        offset = 1;
-                    }
-                    let mut hunk = Hunk::parse(hunk_lines.join("\n").as_str()).unwrap();
-                    hunk.filename = current_filename.to_string();
-                    hunk.diff_location = (i - hunk.changes.len() - offset) as u16;
+                    let mut hunk =
+                        Hunk::parse(hunk_lines.join("\n").as_str(), current_filename.to_string())
+                            .unwrap();
+                    hunk.diff_location = hunk_start as u16;
                     diff.hunks.push(hunk);
                     hunk_lines = vec![];
+                    hunk_start = i + 1; // diff_location does not include the @@ line
                     if line.starts_with("@@") {
+                        println!("B: Adding line `{}`", line);
                         hunk_lines.push(line);
+                        continue;
                     }
                     if line.starts_with("Recent commits") {
                         break;
                     }
                 }
 
-                if building_hunk {
+                if building_hunk && !line.starts_with("modified ") {
                     hunk_lines.push(line);
+                    println!("C: Adding line `{}`", line);
                     continue;
                 }
             }
         }
-        Some(diff)
+
+        if hunk_lines.len() > 0 {
+            let mut hunk =
+                Hunk::parse(hunk_lines.join("\n").as_str(), current_filename.to_string()).unwrap();
+            hunk.diff_location = hunk_start as u16;
+            diff.hunks.push(hunk);
+        }
+        if !diff.headers.is_empty() && diff.hunks.len() > 0 {
+            Some(diff)
+        } else {
+            None
+        }
     }
 }
-
-
 
 #[cfg(test)]
 mod tests {
@@ -299,7 +311,7 @@ mod tests {
                  general: None,
                  experimental: None,";
 
-        let parsed_hunk = Hunk::parse(&hunk).unwrap();
+        let parsed_hunk = Hunk::parse(&hunk, "src/client.rs".to_string()).unwrap();
         assert_eq!(parsed_hunk.start_old, 60);
         assert_eq!(parsed_hunk.start_new, 60);
         assert_eq!(parsed_hunk.change_length_old, 9);
@@ -410,9 +422,13 @@ d083654 more readme
 
     #[test]
     fn test_uri_for_rel() {
-        let output = uri_from_relative_filename("/Users/chrishipple/diff-lsp/".to_string(), "src/main.rs");
+        let output =
+            uri_from_relative_filename("/Users/chrishipple/diff-lsp/".to_string(), "src/main.rs");
         println!("output {:?}", output.as_str());
-        assert_eq!("file:///Users/chrishipple/diff-lsp/src/main.rs", output.as_str());
+        assert_eq!(
+            "file:///Users/chrishipple/diff-lsp/src/main.rs",
+            output.as_str()
+        );
     }
 
     #[test]
@@ -435,10 +451,13 @@ d083654 more readme
     #[test]
     fn test_parse_code_review() {
         let diff = MagitDiff::parse(test_data::RAW_CODE_REVIEW_DIFF_GO).unwrap();
-
         assert_eq!(
             diff.headers.get(&DiffHeader::Project),
             Some(&"*Code Review*".to_string())
         );
+
+        let first_hunk = &diff.hunks[0];
+        assert_eq!(first_hunk.filename, "components/hover.go".to_string());
+        assert_eq!(diff.hunks.len(), 2)
     }
 }
