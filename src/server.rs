@@ -82,7 +82,8 @@ impl DiffLsp {
             diff_map: Mutex::new((|| {
                 // TODO Actually set diff during textDocument/didOpen
                 let mut map: HashMap<Url, ParsedDiff> = HashMap::new();
-                let diff_path = expanduser("~/lsp-example/test6.diff-test").unwrap();
+                // let diff_path = expanduser("~/lsp-example/test6.diff-test").unwrap();
+                let diff_path = expanduser("~/lsp-example/code-review.diff-test").unwrap();
 
                 let contents = fs::read_to_string(diff_path.clone()).unwrap();
                 let diff = MagitDiff::parse(&contents); // TODO determine type from contents
@@ -267,11 +268,14 @@ impl LanguageServer for DiffLsp {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         // info!("Opened document: {:?}", params);  // uncomment to show that we get diff-test as our did open, but we send the real file to the backend
-        info!("Calling did_open {:?}", params);
-        let _real_path = params.text_document.uri.as_str();
+        let real_path = params.text_document.uri.path();
+        // let real_path = params.text_document.text.clone();
+
         // get all the paths from all the diffs
 
-        let contents = fs::read_to_string(_real_path).unwrap();
+        info!("Calling did_open {:?} for the real path: {:?}", params, real_path);
+
+        let contents = fs::read_to_string(real_path).unwrap();
         let diff = MagitDiff::parse(&contents).unwrap();
 
         let mut files = vec![]; // Use the filenames to only send the file(s) of the changed files to their respective LSPs.

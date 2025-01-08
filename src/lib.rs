@@ -227,8 +227,8 @@ impl MagitDiff {
                 if let Some(caps) = re.captures(line) {
                     println!("{}", line);
                     match DiffHeader::from_str(&caps[1]) {
-                        Ok(v) => {
-                            diff.headers.insert(v, caps[2].to_string());
+                        Ok(header) => {
+                            diff.headers.insert(header, caps[2].to_string());
                         }
                         Err(_) => continue,
                     }
@@ -237,7 +237,6 @@ impl MagitDiff {
                 }
             } else {
                 // found headers, moving onto hunks
-                // TODO: Handle multiple files
                 if line.starts_with("modified") {
                     current_filename = line.split_whitespace().nth(1).unwrap();
                     info!("Current filename when parsing: {:?}", current_filename);
@@ -262,6 +261,116 @@ impl MagitDiff {
                         hunk_lines.push(line);
                         continue;
                     }
+                    if line.starts_with("Recent commits") {
+                        break;
+                    }
+                }
+
+                if building_hunk && !line.starts_with("modified ") {
+                    hunk_lines.push(line);
+                    println!("C: Adding line `{}`", line);
+                    continue;
+                }
+            }
+        }
+
+        if hunk_lines.len() > 0 {
+            let mut hunk =
+                Hunk::parse(hunk_lines.join("\n").as_str(), current_filename.to_string()).unwrap();
+            hunk.diff_location = hunk_start as u16;
+            diff.hunks.push(hunk);
+        }
+        if !diff.headers.is_empty() && diff.hunks.len() > 0 {
+            Some(diff)
+        } else {
+            None
+        }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Default, Debug, Clone)]
+pub struct CodeReviewDiff {
+    pub headers: HashMap<DiffHeader, String>,
+    pub hunks: Vec<Hunk>,
+    src: String,
+}
+
+impl Parsable for CodeReviewDiff {
+    fn parse(source: &str) -> Option<ParsedDiff> {
+        if let Some(cr_diff) = CodeReviewDiff::self_parse(source) {
+            return Some(ParsedDiff {
+                headers: cr_diff.headers,
+                hunks: cr_diff.hunks,
+            });
+        }
+        None
+    }
+}
+
+impl CodeReviewDiff {
+    fn self_parse(source: &str) -> Option<Self> {
+        let mut diff = CodeReviewDiff::default();
+
+        let mut found_headers = false;
+        let mut current_filename = "";
+        let mut building_hunk = false;
+        let mut hunk_lines: Vec<&str> = vec![];
+        let mut hunk_start = 0;
+
+        for (i, line) in source.lines().enumerate() {
+            if !found_headers {
+                let re = Regex::new(r"(\w+):\s+(.+)").unwrap();
+                if let Some(caps) = re.captures(line) {
+                    println!("{}", line);
+                    match DiffHeader::from_str(&caps[1]) {
+                        Ok(header) => {
+                            diff.headers.insert(header, caps[2].to_string());
+                        }
+                        Err(_) => continue,
+                    }
+                } else {
+                    found_headers = true;
+                }
+            } else {
+                // found headers, moving onto hunks
+                if line.starts_with("modified") && !building_hunk {
+                    current_filename = line.split_whitespace().nth(1).unwrap();
+                    println!("Current filename when parsing: {:?}", current_filename);
+                    continue;
+                }
+                if line.starts_with("@@") && !building_hunk {
+                    building_hunk = true;
+                    hunk_start = i + 1; // diff_location doesn't include the @@ line
+                    println!("Adding line `{}`", line);
+                    hunk_lines.push(line);
+                    continue;
+                }
+                if ((line.starts_with("@@") || line.starts_with("modified ")) && building_hunk)
+                    || line.starts_with("Recent commits")
+                {
+                    if hunk_lines.len() > 0 {
+                        let mut hunk = Hunk::parse(
+                            hunk_lines.join("\n").as_str(),
+                            current_filename.to_string(),
+                        )
+                        .unwrap();
+                        hunk.diff_location = hunk_start as u16;
+                        diff.hunks.push(hunk);
+                        hunk_lines = vec![];
+                        hunk_start = i + 1; // diff_location does not include the @@ line
+                    }
+                    if line.starts_with("@@") {
+                        println!("B: Adding line `{}`", line);
+                        hunk_lines.push(line);
+                        continue;
+                    }
+
+                    if line.starts_with("modified ") {
+                        current_filename = line.split_whitespace().nth(1).unwrap();
+                        println!("Updating the filename to be: {}", current_filename);
+                    }
+
                     if line.starts_with("Recent commits") {
                         break;
                     }
@@ -450,14 +559,19 @@ d083654 more readme
 
     #[test]
     fn test_parse_code_review() {
-        let diff = MagitDiff::parse(test_data::RAW_CODE_REVIEW_DIFF_GO).unwrap();
+        let diff = CodeReviewDiff::parse(test_data::RAW_CODE_REVIEW_DIFF_GO).unwrap();
         assert_eq!(
             diff.headers.get(&DiffHeader::Project),
             Some(&"*Code Review*".to_string())
         );
+        assert_eq!(diff.hunks.len(), 2);
 
         let first_hunk = &diff.hunks[0];
+        let second_hunk = &diff.hunks[1];
+        println!("{:?}", first_hunk.filename);
+        println!("{:?}", second_hunk.filename);
+
         assert_eq!(first_hunk.filename, "components/hover.go".to_string());
-        assert_eq!(diff.hunks.len(), 2)
+        assert_eq!(second_hunk.filename, "main.go".to_string());
     }
 }

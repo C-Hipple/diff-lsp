@@ -1,0 +1,13 @@
+** TODO diff-lsp [2/5]
+*** DONE works on code-review buffers
+CLOSED: [2025-01-07 Tue 22:31]
+*** TODO Fix source mapping on code-review buffer
+and likely magit-diff buffers when they have multiple hunks
+*** MAYBE fix tab character when the diffs use tabs :puke:
+*** MAYBE Create a readthedocs page
+*** DONE Set textDocument/DidOpen to actually set the LSP diff
+CLOSED: [2024-12-30 Mon 14:13]
+** TODO diff-lsp.el [0/3]
+*** TODO fix automatic installation
+*** TODO testing with lsp-mode
+*** TODO testing with eglot
