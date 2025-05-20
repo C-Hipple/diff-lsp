@@ -1,6 +1,7 @@
+pub mod test_data;
+
 #[cfg(test)]
 mod tests {
-    use diff_lsp::test_data;
     use diff_lsp::{
         uri_from_relative_filename, CodeReviewDiff, DiffHeader, Hunk, LineType, MagitDiff, Parsable,
     };
