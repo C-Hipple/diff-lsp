@@ -1,0 +1,68 @@
+Project: magit: lsp-example
+Root: /Users/chrishipple/lsp-example/
+Buffer: lsp-example
+Type: magit-status
+Head:     main little cleanup
+Merge:    origin/main little cleanup
+Push:     origin/main little cleanup
+
+Unstaged changes (2)
+modified   main.go
+@@ -11,9 +11,10 @@ import (
+    "github.com/TobiasYin/go-lsp/logs"
+ )
+
++var logger *log.Logger
++var logPath *string
++
+ func init() {
+-	var logger *log.Logger
+-	var logPath *string
+    defer func() {
+        logs.Init(logger)
+    }()
+@@ -34,7 +35,8 @@ func init() {
+    }
+    f, err := os.Create(p)
+    if err == nil {
+-		logger = log.New(f, "", 0)
++		logger = log.New(f, "new", 0)
++		logger.Println("My Logging start")
+        return
+    }
+    panic(fmt.Sprintf("logs init error: %v", err))
+@@ -42,6 +44,8 @@ func init() {
+ }
+
+ func main() {
++	logger.Println("Logging start")
++	fmt.Printf("log.Logger: %v\n", "starting")
+    lsp_server := server.MyServer()
+    lsp_server.Run()
+ }
+modified   server/server.go
+@@ -9,14 +9,14 @@ import (
+
+ func MyServer() *lsp.Server {
+    progress := false
+-	options := &lsp.Options{
++	options := lsp.Options{
+        Address: "127.0.0.1:9907",
+        HoverProvider: &defines.HoverOptions{
+            WorkDoneProgressOptions: defines.WorkDoneProgressOptions{
+                WorkDoneProgress: &progress}},
++		TextDocumentSync: 0,
+    }
+-	server := lsp.NewServer(options)
++	server := lsp.NewServer(&options)
+    server.OnHover(components.Hover)
+-
+    return server
+ }
+
+Recent commits
+1332ff8 origin/main little cleanup
+1511d2c a bit more hover stuff
+3d20bcb working hover provider!
+401e3c0 doing golang
+c800636 Initial commit

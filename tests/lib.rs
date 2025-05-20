@@ -1,9 +1,9 @@
 #[cfg(test)]
 mod tests {
-    use diff_lsp::test_data;
     use diff_lsp::{
         uri_from_relative_filename, CodeReviewDiff, DiffHeader, Hunk, LineType, MagitDiff, Parsable,
     };
+    use std::fs;
 
     #[test]
     fn test_parse_hunk() {
@@ -145,7 +145,8 @@ d083654 more readme
 
     #[test]
     fn test_source_map() {
-        let diff = MagitDiff::parse(test_data::RAW_MAGIT_DIFF_GO).unwrap();
+        let go_code_status_diff = fs::read_to_string("tests/data/go_diff.magit_status").unwrap();
+        let diff = MagitDiff::parse(&go_code_status_diff).unwrap();
 
         let map = diff.map_diff_line_to_src(10);
         assert!(map.is_none(), "Before hunk starts");
@@ -162,7 +163,8 @@ d083654 more readme
 
     #[test]
     fn test_parse_code_review() {
-        let diff = CodeReviewDiff::parse(test_data::RAW_CODE_REVIEW_DIFF_GO).unwrap();
+        let go_code_review_diff = fs::read_to_string("tests/data/go_diff.code_review").unwrap();
+        let diff = CodeReviewDiff::parse(&go_code_review_diff).unwrap();
         assert_eq!(
             diff.headers.get(&DiffHeader::Project),
             Some(&"*Code Review*".to_string())

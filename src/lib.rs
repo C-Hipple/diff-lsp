@@ -10,7 +10,6 @@ use strum_macros::EnumString;
 
 pub mod client;
 pub mod server;
-pub mod test_data;
 
 #[derive(Debug, Hash, PartialEq, std::cmp::Eq)]
 pub enum SupportedFileType {
