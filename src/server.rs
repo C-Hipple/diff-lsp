@@ -83,7 +83,8 @@ impl DiffLsp {
                 // TODO Actually set diff during textDocument/didOpen
                 let mut map: HashMap<Url, ParsedDiff> = HashMap::new();
                 // let diff_path = expanduser("~/lsp-example/test6.diff-test").unwrap();
-                let diff_path = expanduser("~/lsp-example/code-review.diff-test").unwrap();
+                // let diff_path = expanduser("~/lsp-example/code-review.diff-test").unwrap();
+                let diff_path = expanduser("~/gtdbot/diff-lsp-status.diff-test").unwrap();
 
                 let contents = fs::read_to_string(diff_path.clone()).unwrap();
                 let diff = MagitDiff::parse(&contents); // TODO determine type from contents
@@ -140,7 +141,7 @@ impl DiffLsp {
 impl LanguageServer for DiffLsp {
     async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
         self.client
-            .log_message(MessageType::WARNING, "Starting")
+            .log_message(MessageType::WARNING, "Cruising")
             .await;
         info!("Starting initialize");
         for backend_mutex in self.backends.values().into_iter() {
@@ -273,7 +274,10 @@ impl LanguageServer for DiffLsp {
 
         // get all the paths from all the diffs
 
-        info!("Calling did_open {:?} for the real path: {:?}", params, real_path);
+        info!(
+            "Calling did_open {:?} for the real path: {:?}",
+            params, real_path
+        );
 
         let contents = fs::read_to_string(real_path).unwrap();
         let diff = MagitDiff::parse(&contents).unwrap();
@@ -446,7 +450,7 @@ mod tests {
     async fn test_end_to_end_gopls() {
         // Note this test depends on the environment having gopls installed and on the path.
         let diff = MagitDiff::parse(test_data::RAW_MAGIT_DIFF_GO).unwrap();
-        let root: String = expanduser("~/lsp-example").unwrap().display().to_string();
+        let root: String = expanduser("~/diff-lsp").unwrap().display().to_string();
         info!("Root is {:?}", root);
 
         assert_eq!(
