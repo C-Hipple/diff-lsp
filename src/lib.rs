@@ -66,14 +66,14 @@ impl LineType {
 }
 
 #[allow(dead_code)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct DiffLine {
     line_type: LineType,
     line: String,
 }
 
 #[allow(dead_code)]
-#[derive(Default, Clone, Debug)]
+#[derive(Default, Clone, Debug, PartialEq)]
 pub struct Hunk {
     pub filename: String, // relative path, i.e. /src/client.rs
     pub start_old: u16,
@@ -188,6 +188,16 @@ impl ParsedDiff {
             }
         }
         None
+    }
+}
+
+impl Parsable for ParsedDiff {
+    fn parse(source: &str) -> Option<ParsedDiff> {
+        if source.contains("Type: code-review") {
+            CodeReviewDiff::parse(source)
+        } else {
+            MagitDiff::parse(source)
+        }
     }
 }
 

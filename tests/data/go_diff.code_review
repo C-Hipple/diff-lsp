@@ -1,7 +1,7 @@
 Project: *Code Review*
 Root: /Users/chris/diff-lsp/
 Buffer: diff-lsp
-Type: magit-status
+Type: code-review
 Author:          @C-Hipple
 Title:           dev: Handle
 State:           OPEN

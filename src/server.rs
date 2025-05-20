@@ -280,7 +280,7 @@ impl LanguageServer for DiffLsp {
         );
 
         let contents = fs::read_to_string(real_path).unwrap();
-        let diff = MagitDiff::parse(&contents).unwrap();
+        let diff = ParsedDiff::parse(&contents).unwrap();
 
         let mut files = vec![]; // Use the filenames to only send the file(s) of the changed files to their respective LSPs.
         for hunk in &diff.hunks {

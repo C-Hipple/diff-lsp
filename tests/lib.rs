@@ -1,7 +1,8 @@
 #[cfg(test)]
 mod tests {
     use diff_lsp::{
-        uri_from_relative_filename, CodeReviewDiff, DiffHeader, Hunk, LineType, MagitDiff, Parsable,
+        uri_from_relative_filename, CodeReviewDiff, DiffHeader, Hunk, LineType, MagitDiff,
+        Parsable, ParsedDiff,
     };
     use std::fs;
 
@@ -29,6 +30,21 @@ mod tests {
         assert_eq!(parsed_hunk.change_length_old, 9);
         assert_eq!(parsed_hunk.change_length_new, 10);
         assert_eq!(parsed_hunk.changes.len(), 13);
+    }
+
+    #[test]
+    fn test_diff_type_selection() {
+        let go_status_diff = fs::read_to_string("tests/data/go_diff.magit_status").unwrap();
+        let parsed_diff_magit = ParsedDiff::parse(&go_status_diff).unwrap();
+        let magit_diff = MagitDiff::parse(&go_status_diff).unwrap();
+        assert_eq!(parsed_diff_magit.headers, magit_diff.headers);
+        assert_eq!(parsed_diff_magit.hunks, magit_diff.hunks);
+
+        let go_code_review_diff = fs::read_to_string("tests/data/go_diff.code_review").unwrap();
+        let parsed_diff_code_review = ParsedDiff::parse(&go_code_review_diff).unwrap();
+        let code_review_diff = CodeReviewDiff::parse(&go_code_review_diff).unwrap();
+        assert_eq!(parsed_diff_code_review.headers, code_review_diff.headers);
+        assert_eq!(parsed_diff_code_review.hunks, code_review_diff.hunks);
     }
 
     #[test]
@@ -145,8 +161,8 @@ d083654 more readme
 
     #[test]
     fn test_source_map() {
-        let go_code_status_diff = fs::read_to_string("tests/data/go_diff.magit_status").unwrap();
-        let diff = MagitDiff::parse(&go_code_status_diff).unwrap();
+        let go_status_diff = fs::read_to_string("tests/data/go_diff.magit_status").unwrap();
+        let diff = MagitDiff::parse(&go_status_diff).unwrap();
 
         let map = diff.map_diff_line_to_src(10);
         assert!(map.is_none(), "Before hunk starts");
@@ -164,7 +180,7 @@ d083654 more readme
     #[test]
     fn test_parse_code_review() {
         let go_code_review_diff = fs::read_to_string("tests/data/go_diff.code_review").unwrap();
-        let diff = CodeReviewDiff::parse(&go_code_review_diff).unwrap();
+        let diff = ParsedDiff::parse(&go_code_review_diff).unwrap();
         assert_eq!(
             diff.headers.get(&DiffHeader::Project),
             Some(&"*Code Review*".to_string())
