@@ -1,5 +1,7 @@
 use std::env::current_dir;
-use std::fs::{remove_file, OpenOptions};
+use std::fs::{read_to_string, remove_file, OpenOptions};
+
+use regex::Regex;
 use std::io::prelude::*;
 use std::path::PathBuf;
 
@@ -66,10 +68,23 @@ pub fn init() -> Result<(), SetLoggerError> {
 async fn main() {
     let _ = init().unwrap();
     let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
-    let cwd = current_dir().unwrap();
-    let backends = get_backends_map(cwd.to_str().unwrap());
+    let tempfile_path = expanduser("~/.diff-lsp-tempfile").unwrap();
+    let mut cwd = String::new();
+    if let Ok(input) = read_to_string(tempfile_path) {
+        let re = Regex::new(r"^Root:\s(.*)").unwrap();
+        for line in input.lines() {
+            if let Some(caps) = re.captures(line) {
+                let cwd = caps[0];
+                break
+            }
+        }
+
+    } else {
+        panic!("Unable to read coordination tempfile")
+    }
+    let backends = get_backends_map(cwd);
     let (diff_lsp_service, socket) = LspService::new(|client| {
-        DiffLsp::new(client, backends, String::from(cwd.to_str().unwrap()))
+        DiffLsp::new(client, backends, cwd)
     });
 
     info!("Starting server@{:?}", cwd);
