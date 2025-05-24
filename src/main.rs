@@ -1,4 +1,3 @@
-use std::env::current_dir;
 use std::fs::{read_to_string, remove_file, OpenOptions};
 
 use regex::Regex;
@@ -74,18 +73,16 @@ async fn main() {
         let re = Regex::new(r"^Root:\s(.*)").unwrap();
         for line in input.lines() {
             if let Some(caps) = re.captures(line) {
-                let cwd = caps[0];
-                break
+                cwd = caps.get(1).unwrap().as_str().to_string();
+                break;
             }
         }
-
     } else {
-        panic!("Unable to read coordination tempfile")
+        panic!("Unable to read coordination temp-file")
     }
-    let backends = get_backends_map(cwd);
-    let (diff_lsp_service, socket) = LspService::new(|client| {
-        DiffLsp::new(client, backends, cwd)
-    });
+    let backends = get_backends_map(&cwd);
+    let (diff_lsp_service, socket) =
+        LspService::new(|client| DiffLsp::new(client, backends, cwd.to_string()));
 
     info!("Starting server@{:?}", cwd);
 
