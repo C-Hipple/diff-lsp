@@ -150,6 +150,8 @@ pub enum DiffHeader {
     Head,
     Merge,
     Push,
+    Draft,
+    State,
 }
 
 pub trait Parsable {

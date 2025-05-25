@@ -178,7 +178,7 @@ d083654 more readme
     }
 
     #[test]
-    fn test_parse_code_review() {
+    fn test_parse_simple_code_review_buffer() {
         let go_code_review_diff = fs::read_to_string("tests/data/go_diff.code_review").unwrap();
         let diff = ParsedDiff::parse(&go_code_review_diff).unwrap();
         assert_eq!(
@@ -194,5 +194,44 @@ d083654 more readme
 
         assert_eq!(first_hunk.filename, "components/hover.go".to_string());
         assert_eq!(second_hunk.filename, "main.go".to_string());
+    }
+
+    #[test]
+    fn test_parse_complex_code_review_buffeR() {
+        let go_code_review_diff = fs::read_to_string("tests/data/full_go_diff.code_review").unwrap();
+        let diff = ParsedDiff::parse(&go_code_review_diff).unwrap();
+        assert_eq!(
+            diff.headers.get(&DiffHeader::Project),
+            Some(&"*Code Review*".to_string())
+        );
+
+        assert_eq!(
+            diff.headers.get(&DiffHeader::State),
+            Some(&"MERGED".to_string())
+        );
+        assert_eq!(diff.hunks.len(), 7);
+
+        let mapped = diff.map_diff_line_to_src(63).unwrap();
+        assert_eq!(mapped.file_name, "config.go".to_string());
+        assert_eq!(mapped.source_line_type, LineType::Unmodified);
+        assert_eq!(mapped.source_line,  49);
+
+        println!("mapped: {:?}", mapped);
+
+        let mapped = diff.map_diff_line_to_src(64).unwrap();
+        println!("mapped: {:?}", mapped);
+        assert_eq!(mapped.file_name, "config.go".to_string());
+        assert_eq!(mapped.source_line_type, LineType::Unmodified);
+        assert_eq!(mapped.source_line,  50);
+
+        let mapped = diff.map_diff_line_to_src(65).unwrap();
+        assert_eq!(mapped.file_name, "config.go".to_string());
+        assert_eq!(mapped.source_line_type, LineType::Removed);
+        assert_eq!(mapped.source_line,  51);
+
+        let mapped = diff.map_diff_line_to_src(66).unwrap();
+        assert_eq!(mapped.file_name, "config.go".to_string());
+        assert_eq!(mapped.source_line_type, LineType::Added);
+        assert_eq!(mapped.source_line,  52);
     }
 }
