@@ -195,8 +195,11 @@ impl Parsable for ParsedDiff {
     fn parse(source: &str) -> Option<ParsedDiff> {
         if source.contains("Type: code-review") {
             CodeReviewDiff::parse(source)
-        } else {
+        } else if source.contains("Type: magit-status") {
             MagitDiff::parse(source)
+        } else {
+            info!("Warning! Unable to determine buffer type to parse!");
+            None
         }
     }
 }
