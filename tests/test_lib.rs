@@ -197,7 +197,7 @@ d083654 more readme
     }
 
     #[test]
-    fn test_parse_complex_code_review_buffeR() {
+    fn test_parse_complex_code_review_buffer() {
         let go_code_review_diff = fs::read_to_string("tests/data/full_go_diff.code_review").unwrap();
         let diff = ParsedDiff::parse(&go_code_review_diff).unwrap();
         assert_eq!(
@@ -214,24 +214,31 @@ d083654 more readme
         let mapped = diff.map_diff_line_to_src(63).unwrap();
         assert_eq!(mapped.file_name, "config.go".to_string());
         assert_eq!(mapped.source_line_type, LineType::Unmodified);
-        assert_eq!(mapped.source_line,  49);
-
-        println!("mapped: {:?}", mapped);
-
-        let mapped = diff.map_diff_line_to_src(64).unwrap();
-        println!("mapped: {:?}", mapped);
-        assert_eq!(mapped.file_name, "config.go".to_string());
-        assert_eq!(mapped.source_line_type, LineType::Unmodified);
         assert_eq!(mapped.source_line,  50);
 
-        let mapped = diff.map_diff_line_to_src(65).unwrap();
+        println!("mapped 63: {:?}", mapped);
+
+        let mapped = diff.map_diff_line_to_src(64).unwrap();
+        println!("mapped: 64 {:?}", mapped);
         assert_eq!(mapped.file_name, "config.go".to_string());
         assert_eq!(mapped.source_line_type, LineType::Removed);
         assert_eq!(mapped.source_line,  51);
 
-        let mapped = diff.map_diff_line_to_src(66).unwrap();
+        let mapped = diff.map_diff_line_to_src(65).unwrap();
         assert_eq!(mapped.file_name, "config.go".to_string());
         assert_eq!(mapped.source_line_type, LineType::Added);
         assert_eq!(mapped.source_line,  52);
+
+        let mapped = diff.map_diff_line_to_src(66).unwrap();
+        assert_eq!(mapped.file_name, "config.go".to_string());
+        assert_eq!(mapped.source_line_type, LineType::Unmodified);
+        assert_eq!(mapped.source_line,  53);
+
+        // Around the comment
+        let mapped = diff.map_diff_line_to_src(240).unwrap();
+        println!("mapped: 240 {:?}", mapped);
+        assert_eq!(mapped.file_name, "workflows/review_workflow.go".to_string());
+        assert_eq!(mapped.source_line_type, LineType::Added);
+        assert_eq!(mapped.source_line,  53);
     }
 }

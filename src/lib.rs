@@ -87,7 +87,9 @@ pub struct Hunk {
 impl Hunk {
     pub fn parse(source: &str, filename: String) -> Option<Hunk> {
         debug!("Parsing the hunk from lines for the file {}:", filename);
+        eprintln!("Parsing the hunk from lines for the file {}:", filename);
         debug!("{}", source);
+        println!("{}", source);
         let mut found_header = false;
         let mut wip = Hunk::default();
         wip.filename = filename;
@@ -139,6 +141,7 @@ pub struct SourceMap {
     pub source_line: u16,
     pub file_type: SupportedFileType,
     pub source_line_type: LineType,
+    pub source_line_text: String,
 }
 
 #[derive(EnumString, Hash, PartialEq, std::cmp::Eq, Debug, Clone)]
@@ -173,10 +176,12 @@ impl ParsedDiff {
                 info!("map: pos_in_hunk: {:?}", pos_in_hunk);
                 return Some(SourceMap {
                     file_name: hunk.filename,
-                    source_line: line_num - hunk.diff_location + hunk.start_new - 1, // LSP is 0 index.  Editors are 1 index.  Subtract 1 so they match
+                    // source_line: line_num - hunk.diff_location + hunk.start_new - 1, // LSP is 0 index.  Editors are 1 index.  Subtract 1 so they match
+                    source_line: line_num - hunk.diff_location + hunk.start_new, // trying without 0 index?
 
                     file_type: supported_file_type,
                     source_line_type: hunk.changes[pos_in_hunk].line_type,
+                    source_line_text: hunk.changes[pos_in_hunk].line.clone(),
                 });
             }
         }
@@ -260,7 +265,7 @@ impl MagitDiff {
                 if line.starts_with("@@") && !building_hunk {
                     building_hunk = true;
                     hunk_start = i + 1; // diff_location doesn't include the @@ line
-                    println!("Adding line `{}`", line);
+                    println!("({:?})Adding line `{}`", i, line);
                     hunk_lines.push(line);
                     continue;
                 }
@@ -273,7 +278,7 @@ impl MagitDiff {
                     hunk_lines = vec![];
                     hunk_start = i + 1; // diff_location does not include the @@ line
                     if line.starts_with("@@") {
-                        println!("B: Adding line `{}`", line);
+                        println!("B: ({:?})Adding line `{}`", i, line);
                         hunk_lines.push(line);
                         continue;
                     }
@@ -284,7 +289,7 @@ impl MagitDiff {
 
                 if building_hunk && !line.starts_with("modified ") {
                     hunk_lines.push(line);
-                    println!("C: Adding line `{}`", line);
+                    println!("C: ({:?})Adding line `{}`", i, line);
                     continue;
                 }
             }
@@ -326,6 +331,7 @@ impl Parsable for CodeReviewDiff {
 
 impl CodeReviewDiff {
     fn self_parse(source: &str) -> Option<Self> {
+        println!("Doing code review parse");
         let mut diff = CodeReviewDiff::default();
 
         let mut found_headers = false;
@@ -333,6 +339,7 @@ impl CodeReviewDiff {
         let mut building_hunk = false;
         let mut hunk_lines: Vec<&str> = vec![];
         let mut hunk_start = 0;
+        let mut in_comment = false;
 
         for (i, line) in source.lines().enumerate() {
             if !found_headers {
@@ -352,19 +359,34 @@ impl CodeReviewDiff {
                 // found headers, moving onto hunks
                 if line.starts_with("modified") && !building_hunk {
                     current_filename = line.split_whitespace().nth(1).unwrap();
-                    println!("Current filename when parsing: {:?}", current_filename);
+                    eprintln!("Current filename when parsing: {:?}", current_filename);
                     continue;
                 }
+
                 if line.starts_with("@@") && !building_hunk {
                     building_hunk = true;
                     hunk_start = i + 1; // diff_location doesn't include the @@ line
-                    println!("Adding line `{}`", line);
+                    println!("starting hunk with line `{}`", line);
                     hunk_lines.push(line);
                     continue;
                 }
-                if ((line.starts_with("@@") || line.starts_with("modified ")) && building_hunk)
-                    || line.starts_with("Recent commits")
-                {
+
+                if line.starts_with("Reviewed by") {
+                    in_comment = true;
+                    continue;
+                }
+
+                if in_comment && line.starts_with("-------") {
+                    in_comment = false;
+                    continue;
+                }
+
+                if in_comment {
+                    println!("Comment line: {}", line);
+                }
+
+                // TODO: new files, deleted files
+                if (line.starts_with("@@") || line.starts_with("modified ")) && building_hunk {
                     if hunk_lines.len() > 0 {
                         let mut hunk = Hunk::parse(
                             hunk_lines.join("\n").as_str(),
@@ -372,12 +394,14 @@ impl CodeReviewDiff {
                         )
                         .unwrap();
                         hunk.diff_location = hunk_start as u16;
+                        eprintln!("That hunk is at diff location: {:?}", hunk.diff_location);
                         diff.hunks.push(hunk);
                         hunk_lines = vec![];
                         hunk_start = i + 1; // diff_location does not include the @@ line
                     }
+
                     if line.starts_with("@@") {
-                        println!("B: Adding line `{}`", line);
+                        println!("B: ({:?})Adding line `{}`", i, line);
                         hunk_lines.push(line);
                         continue;
                     }
@@ -394,7 +418,7 @@ impl CodeReviewDiff {
 
                 if building_hunk && !line.starts_with("modified ") {
                     hunk_lines.push(line);
-                    println!("C: Adding line `{}`", line);
+                    println!("C: ({:?})Adding line `{}`", i, line);
                     continue;
                 }
             }
