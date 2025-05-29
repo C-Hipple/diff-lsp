@@ -1,21 +1,26 @@
 use serde::{Deserialize, Serialize};
+use std::fs::read_to_string;
 
 use log::info;
 use std::collections::HashMap;
 use std::fs;
+use std::path::PathBuf;
 
 use expanduser::expanduser;
 use itertools::Itertools;
 use serde_json::Value;
-use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
+use tower_lsp::jsonrpc::{Error as LspError, ErrorCode, Result as LspResult};
 use tower_lsp::lsp_types::notification::Notification;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
+
+use anyhow::{anyhow, Result};
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::client;
+use crate::utils::get_unique_elements;
 use crate::SupportedFileType;
 use crate::*;
 
@@ -43,21 +48,61 @@ impl Notification for CustomNotification {
 }
 
 pub fn get_backends_map(
+    active_langs: Vec<SupportedFileType>,
     dir: &str,
 ) -> HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>> {
-    //let rust_analyzer = client::ClientForBackendServer::new("rust-analyzer".to_string());
-    // info!("started rust-analyzer.");
-    let gopls = client::ClientForBackendServer::new("gopls".to_string(), dir);
-    // // MAYBE global pylsp :/ ?
-    // let pylsp = client::ClientForBackendServer::new("pylsp".to_string());
-
     let mut backends: HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>> =
         HashMap::new();
 
-    //backends.insert(SupportedFileType::Rust, Arc::new(Mutex::new(rust_analyzer)));
-    backends.insert(SupportedFileType::Go, Arc::new(Mutex::new(gopls)));
+    if active_langs.contains(&SupportedFileType::Rust) {
+        backends.insert(
+            SupportedFileType::Rust,
+            Arc::new(Mutex::new(client::ClientForBackendServer::new(
+                "rust-analyzer".to_string(),
+                dir,
+            ))),
+        );
+    }
+
+    if active_langs.contains(&SupportedFileType::Go) {
+        backends.insert(
+            SupportedFileType::Go,
+            Arc::new(Mutex::new(client::ClientForBackendServer::new(
+                "gopls".to_string(),
+                dir,
+            ))),
+        );
+    }
     // backends.insert(SupportedFileType::Python, Arc::new(Mutex::new(pylsp)));
     backends
+}
+
+pub fn get_initialization_params_from_tempfile(
+    file_path: &PathBuf,
+) -> Result<(String, Vec<SupportedFileType>)> {
+    if let Ok(input) = read_to_string(file_path) {
+        let mut cwd = String::new();
+        let mut file_types: Vec<SupportedFileType> = vec![];
+        let root_regex = Regex::new(r"^Root:\s(.*)").unwrap();
+        let file_regex = Regex::new(r"^(modified|new file|deleted)\s+(.*)").unwrap();
+        // let file_regex = Regex::new(r"^(modified|new file|deleted):\s+(.*)").unwrap();
+        for line in input.lines() {
+            if let Some(caps) = root_regex.captures(line) {
+                cwd = caps.get(1).unwrap().as_str().to_string();
+                // break;
+            }
+            if let Some(caps) = file_regex.captures(line) {
+                println!("caps: {:?}", caps.len());
+                let filename = caps.get(2).unwrap().as_str().to_string();
+                if let Some(file_type) = SupportedFileType::from_filename(filename) {
+                    file_types.push(file_type);
+                }
+            }
+        }
+        Ok((cwd, get_unique_elements(&file_types)))
+    } else {
+        return Err(anyhow!("Unable to read input tempfile"));
+    }
 }
 
 #[derive(Debug)]
@@ -139,7 +184,7 @@ impl DiffLsp {
 
 #[tower_lsp::async_trait]
 impl LanguageServer for DiffLsp {
-    async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, _: InitializeParams) -> LspResult<InitializeResult> {
         self.client
             .log_message(MessageType::WARNING, "Cruising")
             .await;
@@ -151,7 +196,7 @@ impl LanguageServer for DiffLsp {
                 backend.lsp_command
             );
             backend.initialize().unwrap();
-            //info!("Result for that initialize: {:?}", res);
+            //info!("LspResult for that initialize: {:?}", res);
             //return Ok(res);
         }
 
@@ -190,14 +235,14 @@ impl LanguageServer for DiffLsp {
         info!("Finished all initialized");
     }
 
-    async fn shutdown(&self) -> Result<()> {
+    async fn shutdown(&self) -> LspResult<()> {
         self.client
             .log_message(MessageType::INFO, "Shutting Down.  Cya next time!")
             .await;
         Ok(())
     }
 
-    async fn execute_command(&self, params: ExecuteCommandParams) -> Result<Option<Value>> {
+    async fn execute_command(&self, params: ExecuteCommandParams) -> LspResult<Option<Value>> {
         if params.command == "custom.notification" {
             self.client
                 .send_notification::<CustomNotification>(CustomNotificationParams::new(
@@ -212,11 +257,11 @@ impl LanguageServer for DiffLsp {
                 .await;
             Ok(None)
         } else {
-            Err(Error::invalid_request())
+            Err(LspError::invalid_request())
         }
     }
 
-    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+    async fn hover(&self, params: HoverParams) -> LspResult<Option<Hover>> {
         //  let output = Hover {
         //      contents: HoverContents::Scalar(MarkedString::from_markdown("Hover Text".to_string())),
         //      range: None,
@@ -227,14 +272,14 @@ impl LanguageServer for DiffLsp {
             .await;
         let source_map = match source_map_res {
             Some(sm) => sm,
-            None => return Err(Error::new(ErrorCode::ServerError(1))),
+            None => return Err(LspError::new(ErrorCode::ServerError(1))),
         };
 
         info!("source map: {:?}", source_map);
         let backend_mutex_res = self.get_backend(&source_map);
         let backend_mutex = match backend_mutex_res {
             Some(bm) => bm,
-            None => return Err(Error::new(ErrorCode::ServerError(1))),
+            None => return Err(LspError::new(ErrorCode::ServerError(1))),
         };
         let mut backend = backend_mutex.lock().await;
         // TODO do all this mapping in an async func since there's a lot of cloning and whatnot and then futures::join! it with the backend_mutex
@@ -263,7 +308,7 @@ impl LanguageServer for DiffLsp {
         let hov_res = backend.hover(mapped_params);
         match hov_res {
             Ok(res) => Ok(res),
-            Err(_) => Err(Error::new(ErrorCode::ServerError(1))), // Translating Error type
+            Err(_) => Err(LspError::new(ErrorCode::ServerError(1))), // Translating LspError type
         }
     }
 
@@ -334,7 +379,7 @@ impl LanguageServer for DiffLsp {
         info!("Calling did_close {:?}", params)
     }
 
-    async fn references(&self, _params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+    async fn references(&self, _params: ReferenceParams) -> LspResult<Option<Vec<Location>>> {
         info!("Getting references not yet implemented.");
         Ok(None)
     }
@@ -342,7 +387,7 @@ impl LanguageServer for DiffLsp {
     async fn goto_definition(
         &self,
         _params: GotoDefinitionParams,
-    ) -> Result<Option<GotoDefinitionResponse>> {
+    ) -> LspResult<Option<GotoDefinitionResponse>> {
         //info!("goto_definition not yet implemented.");
 
         let source_map_res = self
@@ -350,7 +395,7 @@ impl LanguageServer for DiffLsp {
             .await;
         let source_map = match source_map_res {
             Some(sm) => sm,
-            None => return Err(Error::new(ErrorCode::ServerError(1))),
+            None => return Err(LspError::new(ErrorCode::ServerError(1))),
         };
 
         let mut mapped_params = _params.clone();
@@ -358,7 +403,7 @@ impl LanguageServer for DiffLsp {
         let backend_mutex_res = self.get_backend(&source_map);
         let backend_mutex = match backend_mutex_res {
             Some(bm) => bm,
-            None => return Err(Error::new(ErrorCode::ServerError(1))),
+            None => return Err(LspError::new(ErrorCode::ServerError(1))),
         };
 
         let mut backend = backend_mutex.lock().await;
@@ -383,7 +428,7 @@ impl LanguageServer for DiffLsp {
         let goto_def_res = backend.goto_definition(&mapped_params);
         match goto_def_res {
             Ok(res) => Ok(res),
-            Err(_) => Err(Error::new(ErrorCode::ServerError(1))), // Translating Error type
+            Err(_) => Err(LspError::new(ErrorCode::ServerError(1))), // Translating LspError type
         }
     }
 }

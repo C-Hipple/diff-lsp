@@ -10,8 +10,9 @@ use strum_macros::EnumString;
 
 pub mod client;
 pub mod server;
+pub mod utils;
 
-#[derive(Debug, Hash, PartialEq, std::cmp::Eq)]
+#[derive(Debug, Hash, PartialEq, std::cmp::Eq, Copy, Clone)]
 pub enum SupportedFileType {
     Rust,
     Go,

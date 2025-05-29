@@ -2,7 +2,7 @@
 mod tests {
     use diff_lsp::{
         uri_from_relative_filename, CodeReviewDiff, DiffHeader, Hunk, LineType, MagitDiff,
-        Parsable, ParsedDiff,
+        Parsable, ParsedDiff
     };
     use std::fs;
 
