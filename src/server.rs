@@ -47,7 +47,7 @@ impl Notification for CustomNotification {
     const METHOD: &'static str = "custom/notification";
 }
 
-pub fn get_backends_map(
+pub fn create_backends_map(
     active_langs: Vec<SupportedFileType>,
     dir: &str,
 ) -> HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>> {
@@ -77,7 +77,7 @@ pub fn get_backends_map(
     backends
 }
 
-pub fn get_initialization_params_from_tempfile(
+pub fn read_initialization_params_from_tempfile(
     file_path: &PathBuf,
 ) -> Result<(String, Vec<SupportedFileType>)> {
     if let Ok(input) = read_to_string(file_path) {
