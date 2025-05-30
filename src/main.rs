@@ -8,7 +8,7 @@ use expanduser::expanduser;
 use log::{info, Level, LevelFilter, Log, Metadata, Record, SetLoggerError};
 use tower_lsp::{LspService, Server};
 
-use diff_lsp::server::{get_backends_map, get_initialization_params_from_tempfile, DiffLsp};
+use diff_lsp::server::{create_backends_map, read_initialization_params_from_tempfile, DiffLsp};
 
 fn logfile_path() -> PathBuf {
     println!("setting logfile path");
@@ -58,17 +58,17 @@ impl Log for FileLogger {
 
 static LOGGER: FileLogger = FileLogger;
 
-pub fn init() -> Result<(), SetLoggerError> {
+pub fn initialize_logger() -> Result<(), SetLoggerError> {
     log::set_logger(&LOGGER).map(|()| log::set_max_level(LevelFilter::Info))
 }
 
 #[tokio::main]
 async fn main() {
-    let _ = init().unwrap();
+    let _ = initialize_logger().unwrap();
     let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
     let tempfile_path = expanduser("~/.diff-lsp-tempfile").unwrap();
-    let (cwd, langs) = get_initialization_params_from_tempfile(&tempfile_path).unwrap();
-    let backends = get_backends_map(langs, &cwd);
+    let (cwd, langs) = read_initialization_params_from_tempfile(&tempfile_path).unwrap();
+    let backends = create_backends_map(langs, &cwd);
     let (diff_lsp_service, socket) =
         LspService::new(|client| DiffLsp::new(client, backends, cwd.to_string()));
 

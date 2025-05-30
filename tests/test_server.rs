@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests {
 
-    use diff_lsp::server::get_backends_map;
-    use diff_lsp::server::get_initialization_params_from_tempfile;
+    use diff_lsp::server::create_backends_map;
+    use diff_lsp::server::read_initialization_params_from_tempfile;
     use diff_lsp::server::DiffLsp;
     use diff_lsp::SupportedFileType;
     use diff_lsp::{DiffHeader, MagitDiff, Parsable};
@@ -60,7 +60,7 @@ mod tests {
     #[test]
     fn test_get_initialization_params() {
         let path: PathBuf = "tests/data/full_go_diff.code_review".into();
-        let (cwd, file_types) = get_initialization_params_from_tempfile(&path).unwrap();
+        let (cwd, file_types) = read_initialization_params_from_tempfile(&path).unwrap();
         println!("types: {:?}", file_types);
         assert_eq!("/home/chris/gtdbot/".to_string(), cwd);
         assert_eq!(file_types, vec![SupportedFileType::Go])
@@ -91,7 +91,7 @@ mod tests {
             Some(&"diff-lsp".to_string())
         );
 
-        let backends = get_backends_map(vec![SupportedFileType::Rust], &root);
+        let backends = create_backends_map(vec![SupportedFileType::Rust], &root);
         let (service, _socket) =
             // TODO: This no longer sets the diff to RAW_MAGIT_DIFF_RUST
             LspService::new(|client| DiffLsp::new(client, backends, root));
@@ -135,7 +135,7 @@ mod tests {
             diff.headers.get(&DiffHeader::Buffer),
             Some(&"lsp-example".to_string())
         );
-        let backends = get_backends_map(vec![SupportedFileType::Go], &root);
+        let backends = create_backends_map(vec![SupportedFileType::Go], &root);
         let (service, _socket) =
             // TODO: This no longer sets the diff to raw go diff
             LspService::new(|client| DiffLsp::new(client, backends, root));
