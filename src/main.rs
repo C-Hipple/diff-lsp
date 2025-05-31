@@ -11,7 +11,7 @@ use tower_lsp::{LspService, Server};
 use diff_lsp::server::{create_backends_map, read_initialization_params_from_tempfile, DiffLsp};
 
 fn logfile_path() -> PathBuf {
-    println!("setting logfile path");
+    // println!("setting logfile path");
     expanduser("~/.diff-lsp.log").unwrap()
 }
 
