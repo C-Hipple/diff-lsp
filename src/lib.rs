@@ -168,7 +168,9 @@ impl ParsedDiff {
         if let Some(hunk) = self.get_hunk_by_diff_line_number(line_num) {
             if let Some(supported_file_type) = SupportedFileType::from_extension(hunk.file_type()) {
                 let pos_in_hunk: usize = (line_num - hunk.diff_location).into();
-                info!("map: pos_in_hunk: {:?}", pos_in_hunk);
+                println!("map: pos_in_hunk: {:?}", pos_in_hunk);
+                println!("map: diff_location: {:?}", hunk.diff_location);
+                println!("map: start_new: {:?}", hunk.start_new);
                 return Some(SourceMap {
                     file_name: hunk.filename,
                     source_line: line_num - hunk.diff_location + hunk.start_new - 1, // LSP is 0 index.  Editors are 1 index.  Subtract 1 so they match
@@ -380,7 +382,6 @@ impl CodeReviewDiff {
                     hunk_header = line;
                     hunk_start = i + 1; // diff_location doesn't include the @@ line
                     println!("{}starting hunk with line `{}`", hunk_start ,line);
-                    // hunk_lines.push(line);
                     continue;
                 }
 
