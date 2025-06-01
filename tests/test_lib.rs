@@ -150,7 +150,8 @@ d083654 more readme
         assert_eq!(second_hunk.start_new, 73);
         assert_eq!(second_hunk.change_length_old, 17);
         assert_eq!(second_hunk.change_length_new, 17);
-        assert_eq!(second_hunk.changes.len(), 21);
+        // changes.len() includes the empty space at the end for the last diff...
+        assert_eq!(second_hunk.changes.len(), 22);
         assert_eq!(second_hunk.diff_location, 25);
     }
 
@@ -218,12 +219,13 @@ d083654 more readme
         );
         assert_eq!(diff.hunks.len(), 7);
 
+        // 63 is 0 index, so it's 64th line when in editor
         let mapped = diff.map_diff_line_to_src(63).unwrap();
+        println!("mapped 63: {:?}", mapped);
         assert_eq!(mapped.file_name, "config.go".to_string());
         assert_eq!(mapped.source_line_type, LineType::Unmodified);
         assert_eq!(mapped.source_line, 50);
 
-        println!("mapped 63: {:?}", mapped);
 
         let mapped = diff.map_diff_line_to_src(64).unwrap();
         println!("mapped: 64 {:?}", mapped);
