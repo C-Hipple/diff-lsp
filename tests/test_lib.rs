@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests {
     use diff_lsp::{
-        uri_from_relative_filename, DiffHeader, DiffLine, Hunk, LineType, MagitDiff, Parsable,
-        ParsedDiff,
+        uri_from_relative_filename, CodeReviewDiff, DiffHeader, DiffLine, Hunk, LineType,
+        MagitDiff, Parsable, ParsedDiff,
     };
     use std::fs;
 
@@ -46,11 +46,11 @@ mod tests {
         assert_eq!(parsed_diff_magit.headers, magit_diff.headers);
         assert_eq!(parsed_diff_magit.hunks, magit_diff.hunks);
 
-        // let go_code_review_diff = fs::read_to_string("tests/data/go_diff.code_review").unwrap();
-        // let parsed_diff_code_review = ParsedDiff::parse(&go_code_review_diff).unwrap();
-        // let code_review_diff = CodeReviewDiff::parse(&go_code_review_diff).unwrap();
-        // assert_eq!(parsed_diff_code_review.headers, code_review_diff.headers);
-        // assert_eq!(parsed_diff_code_review.hunks, code_review_diff.hunks);
+        let go_code_review_diff = fs::read_to_string("tests/data/go_diff.code_review").unwrap();
+        let parsed_diff_code_review = ParsedDiff::parse(&go_code_review_diff).unwrap();
+        let code_review_diff = CodeReviewDiff::parse(&go_code_review_diff).unwrap();
+        assert_eq!(parsed_diff_code_review.headers, code_review_diff.headers);
+        assert_eq!(parsed_diff_code_review.hunks, code_review_diff.hunks);
     }
 
     #[test]
@@ -225,7 +225,6 @@ d083654 more readme
         assert_eq!(mapped.file_name, "config.go".to_string());
         assert_eq!(mapped.source_line_type, LineType::Unmodified);
         assert_eq!(mapped.source_line, 50);
-
 
         let mapped = diff.map_diff_line_to_src(64).unwrap();
         println!("mapped: 64 {:?}", mapped);

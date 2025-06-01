@@ -72,6 +72,7 @@ pub struct DiffLine {
     pub line_type: LineType,
     pub line: String,
     pub pos_in_hunk: u16,
+    pub source_line_number: SourceLineNumber,
 }
 
 #[allow(dead_code)]
@@ -96,14 +97,14 @@ impl Hunk {
         // NOTE: the last line of the last hunk is an empty line before the "recent commits" line...
         // unsure if it's a problem or not
         let re = Regex::new(r"@@ -(\d+),(\d+) \+(\d+),(\d+) @@").unwrap();
-        if let Some(caps) = re.captures(header) {
+        if let Some(caps) = parse_header(header){
             return Some(Hunk {
                 filename: filename,
                 diff_location: diff_location,
-                start_old: caps[1].parse::<u16>().unwrap(),
-                change_length_old: caps[2].parse::<u16>().unwrap(),
-                start_new: caps[3].parse::<u16>().unwrap(),
-                change_length_new: caps[4].parse::<u16>().unwrap(),
+                start_old: caps.0,
+                change_length_old: caps.1,
+                start_new: caps.2,
+                change_length_new: caps.3,
                 changes: lines,
             });
         } else {
@@ -126,11 +127,25 @@ impl Hunk {
     }
 }
 
+pub fn parse_header(header: &str) -> Option<(u16, u16, u16, u16)> {
+    let re = Regex::new(r"@@ -(\d+),(\d+) \+(\d+),(\d+) @@").unwrap();
+    if let Some(caps) = re.captures(header) {
+        return Some((
+                caps[1].parse::<u16>().unwrap(),
+                caps[2].parse::<u16>().unwrap(),
+                caps[3].parse::<u16>().unwrap(),
+                caps[4].parse::<u16>().unwrap(),
+        ))
+    }
+    None
+}
+
+
 #[derive(Debug)]
 pub struct SourceMap {
     // Return type when you translate a
     pub file_name: String,
-    pub source_line: u16,
+    pub source_line: SourceLineNumber,
     pub file_type: SupportedFileType,
     pub source_line_type: LineType,
     pub source_line_text: String,
@@ -156,42 +171,79 @@ pub trait Parsable {
     // fn map_diff_line_to_src(&self, line_num: u16) -> Option<SourceMap>;
 }
 
+// InputLineNumber refers to a line number on the tempfile input that was initial parsed
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct InputLineNumber(pub u16);
+
+impl InputLineNumber {
+    pub fn new(value: u16) -> Self{
+        InputLineNumber(value)
+    }
+}
+
+// SourceLineNumber refers to a line number on the source file that the diff is referring to.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SourceLineNumber(pub u16);
+
+impl SourceLineNumber {
+    pub fn new(value: u16) -> Self{
+        SourceLineNumber(value)
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Default, Debug, Clone)]
 pub struct ParsedDiff {
     pub headers: HashMap<DiffHeader, String>,
     pub hunks: Vec<Hunk>,
+    // maps the line of the actual source file (after teh diff was applied to FileName, DiffLine tuple)
+    lines_map: HashMap<InputLineNumber, (String, DiffLine)>,
 }
 
 impl ParsedDiff {
     pub fn map_diff_line_to_src(&self, line_num: u16) -> Option<SourceMap> {
-        if let Some(hunk) = self.get_hunk_by_diff_line_number(line_num) {
-            if let Some(supported_file_type) = SupportedFileType::from_extension(hunk.file_type()) {
-                let pos_in_hunk: usize = (line_num - hunk.diff_location).into();
-                println!("map: pos_in_hunk: {:?}", pos_in_hunk);
-                println!("map: diff_location: {:?}", hunk.diff_location);
-                println!("map: start_new: {:?}", hunk.start_new);
+        // TODO: consider using an and_then chain? not sure if applicable
+        if let Some((filename, diff_line)) = self.lines_map.get(&InputLineNumber::new(line_num)) {
+            if let Some(file_type) = SupportedFileType::from_filename(filename.to_string()) {
                 return Some(SourceMap {
-                    file_name: hunk.filename,
-                    source_line: line_num - hunk.diff_location + hunk.start_new - 1, // LSP is 0 index.  Editors are 1 index.  Subtract 1 so they match
-                    // source_line: line_num - hunk.diff_location + hunk.start_new, // trying without 0 index?
-                    file_type: supported_file_type,
-                    source_line_type: hunk.changes[pos_in_hunk].line_type,
-                    source_line_text: hunk.changes[pos_in_hunk].line.clone(),
+                    file_name: filename.clone(),
+                    source_line: diff_line.source_line_number,
+                    file_type: file_type,
+                    source_line_type: diff_line.line_type,
+                    source_line_text: diff_line.line.clone(),
                 });
             }
         }
         None
     }
 
-    fn get_hunk_by_diff_line_number(&self, line_num: u16) -> Option<Hunk> {
-        for hunk in &self.hunks {
-            if line_num > hunk.diff_location && line_num <= hunk.diff_end() {
-                return Some(hunk.clone()); // is this going to shoot me in the foot?
-            }
-        }
-        None
-    }
+    //     if let Some(hunk) = self.get_hunk_by_diff_line_number(line_num) {
+    //         if let Some(supported_file_type) = SupportedFileType::from_extension(hunk.file_type()) {
+    //             let pos_in_hunk: usize = (line_num - hunk.diff_location).into();
+    //             println!("map: pos_in_hunk: {:?}", pos_in_hunk);
+    //             println!("map: diff_location: {:?}", hunk.diff_location);
+    //             println!("map: start_new: {:?}", hunk.start_new);
+    //             return Some(SourceMap {
+    //                 file_name: hunk.filename,
+    //                 source_line: line_num - hunk.diff_location + hunk.start_new - 1, // LSP is 0 index.  Editors are 1 index.  Subtract 1 so they match
+    //                 // source_line: line_num - hunk.diff_location + hunk.start_new, // trying without 0 index?
+    //                 file_type: supported_file_type,
+    //                 source_line_type: hunk.changes[pos_in_hunk].line_type,
+    //                 source_line_text: hunk.changes[pos_in_hunk].line.clone(),
+    //             });
+    //         }
+    //     }
+    //     None
+    // }
+
+    // fn get_hunk_by_diff_line_number(&self, line_num: u16) -> Option<Hunk> {
+    //     for hunk in &self.hunks {
+    //         if line_num > hunk.diff_location && line_num <= hunk.diff_end() {
+    //             return Some(hunk.clone()); // is this going to shoot me in the foot?
+    //         }
+    //     }
+    //     None
+    // }
 }
 
 impl Parsable for ParsedDiff {
@@ -212,6 +264,7 @@ impl Parsable for ParsedDiff {
 pub struct MagitDiff {
     pub headers: HashMap<DiffHeader, String>,
     pub hunks: Vec<Hunk>,
+    lines_map: HashMap<InputLineNumber, (String, DiffLine)>,
     src: String,
 }
 
@@ -221,6 +274,7 @@ impl Parsable for MagitDiff {
             return Some(ParsedDiff {
                 headers: magit_diff.headers,
                 hunks: magit_diff.hunks,
+                lines_map: magit_diff.lines_map,
             });
         }
         None
@@ -238,6 +292,8 @@ impl MagitDiff {
         let mut hunk_lines: Vec<DiffLine> = vec![];
         let mut hunk_header: &str = "";
         let mut hunk_start = 0;
+        let mut start_new: u16 = 0;
+        let mut lines_map: HashMap<InputLineNumber, (String, DiffLine)>;
 
         for (i, line) in source.lines().enumerate() {
             if !found_headers {
@@ -262,9 +318,9 @@ impl MagitDiff {
                 if line.starts_with("@@") && !building_hunk {
                     building_hunk = true;
                     hunk_start = i + 1; // diff_location doesn't include the @@ line
-                    println!("({:?})Adding line `{}`", i, line);
+                    println!("({:?}) Parsing Header `{}`", i, line);
                     hunk_header = line;
-                    // hunk_lines.push(DiffLine { line_type: (), line: line, pos_in_hunk: () });
+                    start_new = parse_header(line).unwrap().2;
                     continue;
                 }
                 if (line.starts_with("@@") && building_hunk) || line.starts_with("Recent commits") {
@@ -291,7 +347,16 @@ impl MagitDiff {
                 }
 
                 if building_hunk && !line.starts_with("modified ") {
-                    hunk_lines.push(DiffLine {
+                    lines_map.insert(InputLineNumber::new(i.try_into().unwrap()), (current_filename.to_string(),
+                        DiffLine {
+                            line_type: LineType::from_line(line),
+                            line: line.to_string(),
+                            pos_in_hunk: (i - hunk_start) as u16,
+                            source_line_number: SourceLineNumber( start_new + ((i - hunk_start) as u16)),
+                        }
+                    ));
+                    hunk_lines.push(
+                        DiffLine {
                         line_type: LineType::from_line(line),
                         line: line.to_string(),
                         pos_in_hunk: i as u16, // i is wrong, we need another tracker
@@ -326,6 +391,7 @@ impl MagitDiff {
 pub struct CodeReviewDiff {
     pub headers: HashMap<DiffHeader, String>,
     pub hunks: Vec<Hunk>,
+    lines_map: HashMap<InputLineNumber, (String, DiffLine)>,
     src: String,
 }
 
@@ -335,6 +401,7 @@ impl Parsable for CodeReviewDiff {
             return Some(ParsedDiff {
                 headers: cr_diff.headers,
                 hunks: cr_diff.hunks,
+                lines_map: cr_diff.lines_map,
             });
         }
         None
@@ -352,6 +419,9 @@ impl CodeReviewDiff {
         let mut hunk_lines: Vec<DiffLine> = vec![];
         let mut hunk_start = 0;
         let mut hunk_header: &str = "";
+        let mut pos_in_hunk = 0;
+        let mut lines_map:  HashMap<u16, (String, DiffLine)>;
+
 
         let mut in_comment = false;
 
@@ -379,9 +449,10 @@ impl CodeReviewDiff {
 
                 if line.starts_with("@@") && !building_hunk {
                     building_hunk = true;
+                    pos_in_hunk = 0;
                     hunk_header = line;
                     hunk_start = i + 1; // diff_location doesn't include the @@ line
-                    println!("{}starting hunk with line `{}`", hunk_start ,line);
+                    println!("{}starting hunk with line `{}`", hunk_start, line);
                     continue;
                 }
 
@@ -405,15 +476,19 @@ impl CodeReviewDiff {
                     if line.starts_with("@@") {
                         hunk_header = line;
                     }
+
                     eprintln!("header: {:?}", hunk_header);
                     eprintln!("lines: {:?}", hunk_lines);
                     if hunk_lines.len() > 0 {
-                        diff.hunks.push(Hunk::parse(
-                            hunk_header,
-                            hunk_lines,
-                            current_filename.to_string(),
-                            hunk_start as u16,
-                        ).unwrap())
+                        diff.hunks.push(
+                            Hunk::parse(
+                                hunk_header,
+                                hunk_lines,
+                                current_filename.to_string(),
+                                hunk_start as u16,
+                            )
+                            .unwrap(),
+                        )
                     }
 
                     // eprintln!("That hunk is at diff location: {:?}", hunk.diff_location);
@@ -424,6 +499,7 @@ impl CodeReviewDiff {
                     if line.starts_with("@@") {
                         println!("B: ({:?}) Setting Header: `{}`", i, line);
                         hunk_header = line;
+                        pos_in_hunk = 0;
                         continue;
                     }
 
@@ -438,12 +514,14 @@ impl CodeReviewDiff {
                 }
 
                 if building_hunk && !line.starts_with("modified ") {
+                    pos_in_hunk += 1;
+                    lines_map.insert(i, v)
                     hunk_lines.push(DiffLine {
                         line_type: LineType::from_line(line),
                         line: line.to_string(),
-                        pos_in_hunk: i as u16, // i is wrong, we need another tracker
+                        pos_in_hunk: pos_in_hunk as u16, // i is wrong, we need another tracker
                     });
-                    println!("C: ({:?})Adding line `{}`", i, line);
+                    println!("C: ({:?} - {:?})Adding line `{}`", i, pos_in_hunk, line,);
                     continue;
                 }
             }
@@ -459,7 +537,6 @@ impl CodeReviewDiff {
                 )
                 .unwrap(),
             )
-
         }
         if !diff.headers.is_empty() && diff.hunks.len() > 0 {
             Some(diff)

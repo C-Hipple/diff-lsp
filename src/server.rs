@@ -168,7 +168,7 @@ impl DiffLsp {
     }
 
     async fn get_source_map(&self, text_params: TextDocumentPositionParams) -> Option<SourceMap> {
-        let line: u16 = text_params.position.line.try_into().unwrap();
+        let line = text_params.position.line.try_into().unwrap();
         return self
             .line_to_source_map(text_params.text_document.uri, line)
             .await;
