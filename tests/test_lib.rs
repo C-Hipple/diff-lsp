@@ -1,42 +1,11 @@
 #[cfg(test)]
 mod tests {
     use diff_lsp::{
-        uri_from_relative_filename, CodeReviewDiff, DiffHeader, DiffLine, Hunk, LineType,
-        MagitDiff, Parsable, ParsedDiff,
+        uri_from_relative_filename, CodeReviewDiff, DiffHeader, DiffLine, LineType, MagitDiff,
+        Parsable, ParsedDiff, SourceLineNumber,
     };
+    use itertools::Itertools;
     use std::fs;
-
-    #[test]
-    fn test_parse_hunk() {
-        let header: &str = "@@ -60,9 +60,10 @@ impl LspClient {";
-        let hunk_lines = "text_document: {
-                     Some(TextDocumentClientCapabilities {
-                         hover: Some(HoverClientCapabilities::default()),
--                        ..Default::default()
--                    })
--                },
-+                        references: Some(ReferenceClientCapabilities{
-+                            include_declaration: true
-+                        }),
-+                        ..Default::default()},
-                 window: None,
-                 general: None,
-                 experimental: None,"
-            .split("\n")
-            .map(|li| DiffLine {
-                line_type: LineType::from_line(li),
-                line: li.to_string(),
-                pos_in_hunk: 0,
-            })
-            .collect();
-
-        let parsed_hunk = Hunk::parse(header, hunk_lines, "src/client.rs".to_string(), 0).unwrap();
-        assert_eq!(parsed_hunk.start_old, 60);
-        assert_eq!(parsed_hunk.start_new, 60);
-        assert_eq!(parsed_hunk.change_length_old, 9);
-        assert_eq!(parsed_hunk.change_length_new, 10);
-        assert_eq!(parsed_hunk.changes.len(), 13);
-    }
 
     #[test]
     fn test_diff_type_selection() {
@@ -44,13 +13,12 @@ mod tests {
         let parsed_diff_magit = ParsedDiff::parse(&go_status_diff).unwrap();
         let magit_diff = MagitDiff::parse(&go_status_diff).unwrap();
         assert_eq!(parsed_diff_magit.headers, magit_diff.headers);
-        assert_eq!(parsed_diff_magit.hunks, magit_diff.hunks);
 
         let go_code_review_diff = fs::read_to_string("tests/data/go_diff.code_review").unwrap();
         let parsed_diff_code_review = ParsedDiff::parse(&go_code_review_diff).unwrap();
         let code_review_diff = CodeReviewDiff::parse(&go_code_review_diff).unwrap();
         assert_eq!(parsed_diff_code_review.headers, code_review_diff.headers);
-        assert_eq!(parsed_diff_code_review.hunks, code_review_diff.hunks);
+        // assert_eq!(parsed_diff_code_review.hunks, code_review_diff.hunks);
     }
 
     #[test]
@@ -128,31 +96,8 @@ d083654 more readme
             parsed_diff.headers.get(&DiffHeader::Project),
             Some(&"magit: diff-lsp".to_string())
         );
-        let first_hunk = &parsed_diff.hunks[0];
-        assert_eq!(first_hunk.filename, "src/client.rs".to_string());
-        assert_eq!(parsed_diff.hunks.len(), 2);
 
-        let mut hunk_iter = parsed_diff.hunks.into_iter();
-        let top_hunk = hunk_iter.nth(0).unwrap();
-        let second_hunk = hunk_iter.nth(0).unwrap();
-
-        assert_eq!(top_hunk.filename, "src/client.rs".to_string());
-        assert_eq!(second_hunk.filename, "src/client.rs".to_string());
-
-        assert_eq!(top_hunk.start_old, 60);
-        assert_eq!(top_hunk.start_new, 60);
-        assert_eq!(top_hunk.change_length_old, 9);
-        assert_eq!(top_hunk.change_length_new, 10);
-        assert_eq!(top_hunk.changes.len(), 13);
-        assert_eq!(top_hunk.diff_location, 11);
-
-        assert_eq!(second_hunk.start_old, 72);
-        assert_eq!(second_hunk.start_new, 73);
-        assert_eq!(second_hunk.change_length_old, 17);
-        assert_eq!(second_hunk.change_length_new, 17);
-        // changes.len() includes the empty space at the end for the last diff...
-        assert_eq!(second_hunk.changes.len(), 22);
-        assert_eq!(second_hunk.diff_location, 25);
+        assert_eq!(parsed_diff.filenames, vec!["src/client.rs".to_string()])
     }
 
     #[test]
@@ -171,15 +116,19 @@ d083654 more readme
         let go_status_diff = fs::read_to_string("tests/data/go_diff.magit_status").unwrap();
         let diff = MagitDiff::parse(&go_status_diff).unwrap();
 
+        for (k, v) in diff.lines_map.iter() {
+            println!("lines map: {:?} => {:?}", k, v);
+        }
+
         let map = diff.map_diff_line_to_src(10);
         assert!(map.is_none(), "Before hunk starts");
 
         let map = diff.map_diff_line_to_src(13).unwrap(); // the empty space
         assert_eq!(map.source_line_type, LineType::Unmodified);
-        assert_eq!(map.source_line, 12);
+        assert_eq!(map.source_line, SourceLineNumber(12));
 
         let map = diff.map_diff_line_to_src(14).unwrap(); // +var logger
-        assert_eq!(map.source_line, 13);
+        assert_eq!(map.source_line, SourceLineNumber(13));
         assert_eq!(map.source_line_type, LineType::Added);
         assert_eq!(map.file_name, String::from("main.go"));
     }
@@ -192,15 +141,6 @@ d083654 more readme
             diff.headers.get(&DiffHeader::Project),
             Some(&"*Code Review*".to_string())
         );
-        assert_eq!(diff.hunks.len(), 2);
-
-        let first_hunk = &diff.hunks[0];
-        let second_hunk = &diff.hunks[1];
-        println!("{:?}", first_hunk.filename);
-        println!("{:?}", second_hunk.filename);
-
-        assert_eq!(first_hunk.filename, "components/hover.go".to_string());
-        assert_eq!(second_hunk.filename, "main.go".to_string());
     }
 
     #[test]
@@ -217,30 +157,29 @@ d083654 more readme
             diff.headers.get(&DiffHeader::State),
             Some(&"MERGED".to_string())
         );
-        assert_eq!(diff.hunks.len(), 7);
 
         // 63 is 0 index, so it's 64th line when in editor
         let mapped = diff.map_diff_line_to_src(63).unwrap();
         println!("mapped 63: {:?}", mapped);
         assert_eq!(mapped.file_name, "config.go".to_string());
         assert_eq!(mapped.source_line_type, LineType::Unmodified);
-        assert_eq!(mapped.source_line, 50);
+        assert_eq!(mapped.source_line, SourceLineNumber(50));
 
         let mapped = diff.map_diff_line_to_src(64).unwrap();
         println!("mapped: 64 {:?}", mapped);
         assert_eq!(mapped.file_name, "config.go".to_string());
         assert_eq!(mapped.source_line_type, LineType::Removed);
-        assert_eq!(mapped.source_line, 51);
+        assert_eq!(mapped.source_line, SourceLineNumber(51));
 
         let mapped = diff.map_diff_line_to_src(65).unwrap();
         assert_eq!(mapped.file_name, "config.go".to_string());
         assert_eq!(mapped.source_line_type, LineType::Added);
-        assert_eq!(mapped.source_line, 52);
+        assert_eq!(mapped.source_line, SourceLineNumber(52));
 
         let mapped = diff.map_diff_line_to_src(66).unwrap();
         assert_eq!(mapped.file_name, "config.go".to_string());
         assert_eq!(mapped.source_line_type, LineType::Unmodified);
-        assert_eq!(mapped.source_line, 53);
+        assert_eq!(mapped.source_line, SourceLineNumber(53));
 
         let mapped = diff.map_diff_line_to_src(239).unwrap();
         println!("mapped: 239 {:?}", mapped);

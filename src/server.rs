@@ -290,7 +290,7 @@ impl LanguageServer for DiffLsp {
             .text_document_position_params
             .text_document
             .uri = uri;
-        mapped_params.text_document_position_params.position.line = source_map.source_line.into();
+        mapped_params.text_document_position_params.position.line = source_map.source_line.0.into();
 
         if source_map.source_line_type != LineType::Unmodified {
             // this is a problem for 1 letter variables since emacs won't send the hover request
@@ -326,11 +326,7 @@ impl LanguageServer for DiffLsp {
 
         let contents = fs::read_to_string(real_path).unwrap();
         let diff = ParsedDiff::parse(&contents).unwrap();
-
-        let mut files = vec![]; // Use the filenames to only send the file(s) of the changed files to their respective LSPs.
-        for hunk in &diff.hunks {
-            files.push(hunk.filename.clone());
-        }
+        let filtered_files: Vec<String> = diff.filenames.clone().into_iter().unique().collect();
 
         self.diff_map
             .lock()
@@ -338,7 +334,6 @@ impl LanguageServer for DiffLsp {
             .insert(params.text_document.uri.clone(), diff);
 
         // not sure how to type hint the Vec<String> doing this in the loop constructor
-        let filtered_files: Vec<String> = files.into_iter().unique().collect();
         // TODO filter by filetype?
         for filename in filtered_files {
             let filetype = SupportedFileType::from_filename(filename.clone());
@@ -414,7 +409,8 @@ impl LanguageServer for DiffLsp {
             .text_document_position_params
             .text_document
             .uri = uri;
-        mapped_params.text_document_position_params.position.line = source_map.source_line.into();
+        mapped_params.text_document_position_params.position.line = source_map.source_line.0.into() ;
+
 
         if source_map.source_line_type != LineType::Unmodified {
             // this is a problem for 1 letter variables since emacs won't send the hover request
