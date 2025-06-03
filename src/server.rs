@@ -55,6 +55,7 @@ pub fn create_backends_map(
         HashMap::new();
 
     if active_langs.contains(&SupportedFileType::Rust) {
+        info!("Starting Rust Analyzer");
         backends.insert(
             SupportedFileType::Rust,
             Arc::new(Mutex::new(client::ClientForBackendServer::new(
@@ -65,6 +66,7 @@ pub fn create_backends_map(
     }
 
     if active_langs.contains(&SupportedFileType::Go) {
+        info!("Starting Gopls");
         backends.insert(
             SupportedFileType::Go,
             Arc::new(Mutex::new(client::ClientForBackendServer::new(
@@ -127,9 +129,7 @@ impl DiffLsp {
             diff_map: Mutex::new((|| {
                 // TODO Actually set diff during textDocument/didOpen
                 let mut map: HashMap<Url, ParsedDiff> = HashMap::new();
-                // let diff_path = expanduser("~/lsp-example/test6.diff-test").unwrap();
-                // let diff_path = expanduser("~/lsp-example/code-review.diff-test").unwrap();
-                let diff_path = expanduser("~/gtdbot/diff-lsp-status.diff-test").unwrap();
+                let diff_path = expanduser("~/.diff-lsp-tempfile").unwrap();
 
                 let contents = fs::read_to_string(diff_path.clone()).unwrap();
                 let diff = MagitDiff::parse(&contents); // TODO determine type from contents
@@ -157,7 +157,7 @@ impl DiffLsp {
         self.backends.get(&source_map.file_type)
     }
 
-    async fn get_diff(&self, uri: Url) -> Option<ParsedDiff> {
+    async fn get_diff(&self, uri: &Url) -> Option<ParsedDiff> {
         let map = self.diff_map.lock().await;
         let res = map.get(&uri).cloned();
         // info!("Searched for the diff via {:?}, got {:?}",
@@ -170,12 +170,13 @@ impl DiffLsp {
     async fn get_source_map(&self, text_params: TextDocumentPositionParams) -> Option<SourceMap> {
         let line = text_params.position.line.try_into().unwrap();
         return self
-            .line_to_source_map(text_params.text_document.uri, line)
+            .line_to_source_map(text_params.text_document.uri.clone(), line)
             .await;
     }
 
     async fn line_to_source_map(&self, uri: Url, line_num: u16) -> Option<SourceMap> {
-        if let Some(diff) = self.get_diff(uri).await {
+        if let Some(diff) = self.get_diff(&uri).await {
+            info!("Found the diff at URI: {:?}", uri.clone());
             return diff.map_diff_line_to_src(line_num);
         }
         None
@@ -270,9 +271,12 @@ impl LanguageServer for DiffLsp {
         let source_map_res = self
             .get_source_map(params.text_document_position_params.clone())
             .await;
+
         let source_map = match source_map_res {
             Some(sm) => sm,
-            None => return Err(LspError::new(ErrorCode::ServerError(1))),
+            None => {
+                info!("Did not find a source map for this hover!");
+                return Err(LspError::new(ErrorCode::ServerError(1)))},
         };
 
         info!("source map: {:?}", source_map);

@@ -123,13 +123,20 @@ d083654 more readme
         let map = diff.map_diff_line_to_src(10);
         assert!(map.is_none(), "Before hunk starts");
 
-        let map = diff.map_diff_line_to_src(13).unwrap(); // the empty space
+        // the first line of the diff
+        let map = diff.map_diff_line_to_src(12).unwrap();
+        assert_eq!(map.source_line_type, LineType::Unmodified);
+        assert_eq!(map.source_line, SourceLineNumber(11)); // only chance that it's input - 1
+        assert!(map.source_line_text.contains("github"));
+        println!("{:?}", map);
+
+        let map = diff.map_diff_line_to_src(13).unwrap();
         assert_eq!(map.source_line_type, LineType::Unmodified);
         assert_eq!(map.source_line, SourceLineNumber(12));
 
-        let map = diff.map_diff_line_to_src(14).unwrap(); // +var logger
+        let map = diff.map_diff_line_to_src(14).unwrap();
         assert_eq!(map.source_line, SourceLineNumber(13));
-        assert_eq!(map.source_line_type, LineType::Added);
+        assert_eq!(map.source_line_type, LineType::Unmodified);
         assert_eq!(map.file_name, String::from("main.go"));
     }
 
