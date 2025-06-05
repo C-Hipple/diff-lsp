@@ -391,139 +391,99 @@ impl Parsable for CodeReviewDiff {
 
 impl CodeReviewDiff {
     fn self_parse(source: &str) -> Option<Self> {
-        println!("{:?}", source);
-        return None;
+        let mut diff = CodeReviewDiff::default();
+
+        let mut found_headers = false;
+        let mut current_filename = "";
+        let mut building_hunk = false;
+        let mut hunk_start = 0;
+        let mut start_new: u16 = 0;
+        let mut at_source_line: u16 = 0;
+        let mut in_review = false;
+
+        for (i, line) in source.lines().enumerate() {
+            if !found_headers {
+                let re = Regex::new(r"(\w+):\s+(.+)").unwrap();
+                if let Some(caps) = re.captures(line) {
+                    println!("{}", line);
+                    match DiffHeader::from_str(&caps[1]) {
+                        Ok(header) => {
+                            diff.headers.insert(header, caps[2].to_string());
+                        }
+                        Err(_) => continue,
+                    }
+                } else {
+                    found_headers = true;
+                }
+            } else {
+                // found headers, moving onto hunks
+                if line.starts_with("modified") {
+                    current_filename = line.split_whitespace().nth(1).unwrap();
+                    info!("Current filename when parsing: {:?}", current_filename);
+                    diff.filenames.push(current_filename.to_string());
+                }
+                if line.starts_with("@@") && !building_hunk {
+                    building_hunk = true;
+                    hunk_start = i + 1; // diff_location doesn't include the @@ line
+                    println!("({:?}) Parsing Header `{}`", i, line);
+                    start_new = parse_header(line).unwrap().2;
+                    at_source_line = 0;
+                    continue;
+                }
+                if (line.starts_with("@@") && building_hunk) || line.starts_with("Recent commits") {
+                    hunk_start = i + 1; // diff_location does not include the @@ line
+
+                    if line.starts_with("@@") {
+                        println!("B: ({:?}) Setting Header: `{}`", i, line);
+                        start_new = parse_header(line).unwrap().2;
+                        at_source_line = 0;
+                        continue;
+                    }
+                    if line.starts_with("Recent commits") {
+                        break;
+                    }
+                }
+
+                if building_hunk && line.starts_with("Reviewed by") {
+                    in_review = true;
+                    continue;
+                }
+                if in_review && line.starts_with("-------") {
+                    in_review = false;
+                    continue;
+                }
+
+                if in_review {
+                    println!("D: ({:?})Review Comment: {}", i, line);
+                    continue;
+                }
+
+                if building_hunk && !line.starts_with("modified ") {
+                    let line_type = LineType::from_line(line);
+                    let diff_line = DiffLine {
+                        line_type: line_type,
+                        line: line.to_string(),
+                        pos_in_hunk: (i - hunk_start) as u16,
+                        source_line_number: SourceLineNumber(start_new + at_source_line),
+                    };
+
+                    diff.lines_map.insert(
+                        InputLineNumber::new((i + 1).try_into().unwrap()),
+                        (current_filename.to_string(), diff_line.clone()),
+                    );
+
+                    if matches!(line_type, LineType::Added | LineType::Unmodified) {
+                        at_source_line += 1;
+                    }
+
+                    println!(
+                        "C: ({:?})Adding line @ {:?} `{}`",
+                        i, diff_line.source_line_number.0, line
+                    );
+                    continue;
+                }
+            }
+        }
+        Some(diff)
     }
-    //     println!("Doing code review parse");
-    //     let mut diff = CodeReviewDiff::default();
-
-    //     let mut found_headers = false;
-    //     let mut current_filename = "";
-    //     let mut building_hunk = false;
-    //     let mut hunk_start = 0;
-    //     let mut hunk_header: &str = "";
-    //     let mut pos_in_hunk = 0;
-    //     let mut lines_map:  HashMap<u16, (String, DiffLine)>;
-
-    //     let mut in_comment = false;
-
-    //     for (i, line) in source.lines().enumerate() {
-    //         if !found_headers {
-    //             let re = Regex::new(r"(\w+):\s+(.+)").unwrap();
-    //             if let Some(caps) = re.captures(line) {
-    //                 println!("{}", line);
-    //                 match DiffHeader::from_str(&caps[1]) {
-    //                     Ok(header) => {
-    //                         diff.headers.insert(header, caps[2].to_string());
-    //                     }
-    //                     Err(_) => continue,
-    //                 }
-    //             } else {
-    //                 found_headers = true;
-    //             }
-    //         } else {
-    //             // found headers, moving onto hunks
-    //             if line.starts_with("modified") && !building_hunk {
-    //                 current_filename = line.split_whitespace().nth(1).unwrap();
-    //                 eprintln!("Current filename when parsing: {:?}", current_filename);
-    //                 continue;
-    //             }
-
-    //             if line.starts_with("@@") && !building_hunk {
-    //                 building_hunk = true;
-    //                 pos_in_hunk = 0;
-    //                 hunk_header = line;
-    //                 hunk_start = i + 1; // diff_location doesn't include the @@ line
-    //                 println!("{}starting hunk with line `{}`", hunk_start, line);
-    //                 continue;
-    //             }
-
-    //             if line.starts_with("Reviewed by") {
-    //                 in_comment = true;
-    //                 continue;
-    //             }
-
-    //             if in_comment && line.starts_with("-------") {
-    //                 in_comment = false;
-    //                 continue;
-    //             }
-
-    //             if in_comment {
-    //                 println!("Comment line: {}", line);
-    //                 continue;
-    //             }
-
-    //             // TODO: new files, deleted files
-    //             if (line.starts_with("@@") || line.starts_with("modified ")) && building_hunk {
-    //                 if line.starts_with("@@") {
-    //                     hunk_header = line;
-    //                 }
-
-    //                 eprintln!("header: {:?}", hunk_header);
-    //                 eprintln!("lines: {:?}", hunk_lines);
-    //                 if hunk_lines.len() > 0 {
-    //                     diff.hunks.push(
-    //                         Hunk::parse(
-    //                             hunk_header,
-    //                             hunk_lines,
-    //                             current_filename.to_string(),
-    //                             hunk_start as u16,
-    //                         )
-    //                         .unwrap(),
-    //                     )
-    //                 }
-
-    //                 // eprintln!("That hunk is at diff location: {:?}", hunk.diff_location);
-
-    //                 hunk_lines = vec![];
-    //                 hunk_start = i + 1; // diff_location does not include the @@ line
-
-    //                 if line.starts_with("@@") {
-    //                     println!("B: ({:?}) Setting Header: `{}`", i, line);
-    //                     hunk_header = line;
-    //                     pos_in_hunk = 0;
-    //                     continue;
-    //                 }
-
-    //                 if line.starts_with("modified ") {
-    //                     current_filename = line.split_whitespace().nth(1).unwrap();
-    //                     println!("Updating the filename to be: {}", current_filename);
-    //                 }
-
-    //                 if line.starts_with("Recent commits") {
-    //                     break;
-    //                 }
-    //             }
-
-    //             if building_hunk && !line.starts_with("modified ") {
-    //                 pos_in_hunk += 1;
-    //                 lines_map.insert(i, v)
-    //                 hunk_lines.push(DiffLine {
-    //                     line_type: LineType::from_line(line),
-    //                     line: line.to_string(),
-    //                     pos_in_hunk: pos_in_hunk as u16, // i is wrong, we need another tracker
-    //                 });
-    //                 println!("C: ({:?} - {:?})Adding line `{}`", i, pos_in_hunk, line,);
-    //                 continue;
-    //             }
-    //         }
-    //     }
-
-    //     if hunk_lines.len() > 0 {
-    //         diff.hunks.push(
-    //             Hunk::parse(
-    //                 hunk_header,
-    //                 hunk_lines,
-    //                 current_filename.to_string(),
-    //                 hunk_start as u16,
-    //             )
-    //             .unwrap(),
-    //         )
-    //     }
-    //     if !diff.headers.is_empty() && diff.hunks.len() > 0 {
-    //         Some(diff)
-    //     } else {
-    //         None
-    //     }
-    // }
 }

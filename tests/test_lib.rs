@@ -146,40 +146,56 @@ mod tests {
         println!("mapped 63: {:?}", mapped);
         assert_eq!(mapped.file_name, "config.go".to_string());
         assert_eq!(mapped.source_line_type, LineType::Unmodified);
-        assert_eq!(mapped.source_line, SourceLineNumber(50));
+        assert_eq!(mapped.source_line, SourceLineNumber(49));
 
         let mapped = diff.map_diff_line_to_src(64).unwrap();
         println!("mapped: 64 {:?}", mapped);
         assert_eq!(mapped.file_name, "config.go".to_string());
-        assert_eq!(mapped.source_line_type, LineType::Removed);
-        assert_eq!(mapped.source_line, SourceLineNumber(51));
+        assert_eq!(mapped.source_line_type, LineType::Unmodified);
+        assert_eq!(mapped.source_line, SourceLineNumber(50));
 
         let mapped = diff.map_diff_line_to_src(65).unwrap();
         assert_eq!(mapped.file_name, "config.go".to_string());
-        assert_eq!(mapped.source_line_type, LineType::Added);
-        assert_eq!(mapped.source_line, SourceLineNumber(52));
+        assert_eq!(mapped.source_line_type, LineType::Removed);
+        assert_eq!(mapped.source_line, SourceLineNumber(51));
 
         let mapped = diff.map_diff_line_to_src(66).unwrap();
         assert_eq!(mapped.file_name, "config.go".to_string());
-        assert_eq!(mapped.source_line_type, LineType::Unmodified);
-        assert_eq!(mapped.source_line, SourceLineNumber(53));
+        assert_eq!(mapped.source_line_type, LineType::Added);
+        assert_eq!(mapped.source_line, SourceLineNumber(51));
 
         let mapped = diff.map_diff_line_to_src(239).unwrap();
         println!("mapped: 239 {:?}", mapped);
         assert_eq!(mapped.source_line_type, LineType::Added);
         assert_eq!(mapped.file_name, "workflows/review_workflow.go".to_string());
 
-        // Before the comment
         let mapped = diff.map_diff_line_to_src(240).unwrap();
         println!("mapped: 240 {:?}", mapped);
+        assert_eq!(mapped.source_line_type, LineType::Added);
+        assert_eq!(mapped.file_name, "workflows/review_workflow.go".to_string());
+
+        // Before the comment
 
         // Around the comment
         let mapped = diff.map_diff_line_to_src(241);
         println!("mapped: 241 {:?}", mapped);
-
         assert!(mapped.is_none());
-        // assert_eq!(mapped.file_name, "workflows/review_workflow.go".to_string());
-        // assert_eq!(mapped.source_line_type, LineType::Added);
-        // assert_eq!(mapped.source_line,  53);
+
+        let mapped = diff.map_diff_line_to_src(242);
+        println!("mapped: 242 {:?}", mapped);
+        assert!(mapped.is_none());
+
+        let mapped = diff.map_diff_line_to_src(243);
+        println!("mapped: 243 {:?}", mapped);
+        assert!(mapped.is_none());
+
+        // after the comment
+        let mapped = diff.map_diff_line_to_src(244).unwrap();
+        println!("mapped: 244 {:?}", mapped);
+        assert_eq!(
+            mapped.source_line_text,
+            "+\tsection, err := doc.GetSection(w.SectionTitle)"
+        );
+        assert_eq!(mapped.source_line, SourceLineNumber(75));
     }
 }
