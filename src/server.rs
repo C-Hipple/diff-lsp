@@ -276,7 +276,8 @@ impl LanguageServer for DiffLsp {
             Some(sm) => sm,
             None => {
                 info!("Did not find a source map for this hover!");
-                return Err(LspError::new(ErrorCode::ServerError(1)))},
+                return Err(LspError::new(ErrorCode::ServerError(1)));
+            }
         };
 
         info!("source map: {:?}", source_map);
@@ -413,8 +414,7 @@ impl LanguageServer for DiffLsp {
             .text_document_position_params
             .text_document
             .uri = uri;
-        mapped_params.text_document_position_params.position.line = source_map.source_line.0.into() ;
-
+        mapped_params.text_document_position_params.position.line = source_map.source_line.0.into();
 
         if source_map.source_line_type != LineType::Unmodified {
             // this is a problem for 1 letter variables since emacs won't send the hover request

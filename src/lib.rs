@@ -290,6 +290,7 @@ impl MagitDiff {
         let mut building_hunk = false;
         let mut hunk_start = 0;
         let mut start_new: u16 = 0;
+        let mut at_source_line: u16 = 0;
 
         for (i, line) in source.lines().enumerate() {
             if !found_headers {
@@ -317,6 +318,7 @@ impl MagitDiff {
                     hunk_start = i + 1; // diff_location doesn't include the @@ line
                     println!("({:?}) Parsing Header `{}`", i, line);
                     start_new = parse_header(line).unwrap().2;
+                    at_source_line = 0;
                     continue;
                 }
                 if (line.starts_with("@@") && building_hunk) || line.starts_with("Recent commits") {
@@ -324,6 +326,8 @@ impl MagitDiff {
 
                     if line.starts_with("@@") {
                         println!("B: ({:?}) Setting Header: `{}`", i, line);
+                        start_new = parse_header(line).unwrap().2;
+                        at_source_line = 0;
                         continue;
                     }
                     if line.starts_with("Recent commits") {
@@ -332,21 +336,28 @@ impl MagitDiff {
                 }
 
                 if building_hunk && !line.starts_with("modified ") {
+                    let line_type = LineType::from_line(line);
+                    let diff_line = DiffLine {
+                        line_type: line_type,
+                        line: line.to_string(),
+                        pos_in_hunk: (i - hunk_start) as u16,
+                        // source_line_number: SourceLineNumber(start_new + ((i - hunk_start) as u16)),
+                        source_line_number: SourceLineNumber(start_new + at_source_line),
+                    };
+
                     diff.lines_map.insert(
                         InputLineNumber::new((i + 1).try_into().unwrap()),
-                        (
-                            current_filename.to_string(),
-                            DiffLine {
-                                line_type: LineType::from_line(line),
-                                line: line.to_string(),
-                                pos_in_hunk: (i - hunk_start) as u16,
-                                source_line_number: SourceLineNumber(
-                                    start_new + ((i - hunk_start) as u16),
-                                ),
-                            },
-                        ),
+                        (current_filename.to_string(), diff_line.clone()),
                     );
-                    println!("C: ({:?})Adding line `{}`", i, line);
+
+                    if matches!(line_type, LineType::Added | LineType::Unmodified) {
+                        at_source_line += 1;
+                    }
+
+                    println!(
+                        "C: ({:?})Adding line @ {:?} `{}`",
+                        i, diff_line.source_line_number.0, line
+                    );
                     continue;
                 }
             }
