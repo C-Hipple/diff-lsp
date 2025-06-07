@@ -210,6 +210,7 @@ impl LanguageServer for DiffLsp {
                 execute_command_provider: None,
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
+                references_provider: Some(OneOf::Left(true)),
                 ..ServerCapabilities::default()
             },
             ..Default::default()
@@ -380,8 +381,36 @@ impl LanguageServer for DiffLsp {
     }
 
     async fn references(&self, _params: ReferenceParams) -> LspResult<Option<Vec<Location>>> {
-        info!("Getting references not yet implemented.");
-        Ok(None)
+        let mut mapped_params = _params.clone();
+        let source_map = self
+            .get_source_map(_params.text_document_position)
+            .await
+            .ok_or(LspError::new(ErrorCode::ServerError(1)))?;
+
+        let backend_mutex_res = self.get_backend(&source_map);
+        let backend_mutex = match backend_mutex_res {
+            Some(bm) => bm,
+            None => return Err(LspError::new(ErrorCode::ServerError(1))),
+        };
+
+        let mut backend = backend_mutex.lock().await;
+
+        let uri = uri_from_relative_filename(self.root.clone(), &source_map.file_name);
+        mapped_params.text_document_position.text_document.uri = uri;
+        mapped_params.text_document_position.position.line = source_map.source_line.0.into();
+
+        if source_map.source_line_type != LineType::Unmodified {
+            // this is a problem for 1 letter variables since emacs won't send the hover request
+            // for whitespace, even if it would get mapped to the correct position
+            // Account for the + or - at the start of the line
+            mapped_params.text_document_position.position.character -= 1;
+        }
+
+        let references_result = backend.references(&mapped_params);
+        match references_result {
+            Ok(res) => Ok(res),
+            Err(_) => Err(LspError::new(ErrorCode::ServerError(1))), // Translating LspError type
+        }
     }
 
     async fn goto_definition(
@@ -390,16 +419,12 @@ impl LanguageServer for DiffLsp {
     ) -> LspResult<Option<GotoDefinitionResponse>> {
         //info!("goto_definition not yet implemented.");
 
-        let source_map_res = self
+        let source_map = self
             .get_source_map(_params.text_document_position_params.clone())
-            .await;
-        let source_map = match source_map_res {
-            Some(sm) => sm,
-            None => return Err(LspError::new(ErrorCode::ServerError(1))),
-        };
+            .await
+            .ok_or(LspError::new(ErrorCode::ServerError(1)))?;
 
         let mut mapped_params = _params.clone();
-
         let backend_mutex_res = self.get_backend(&source_map);
         let backend_mutex = match backend_mutex_res {
             Some(bm) => bm,
