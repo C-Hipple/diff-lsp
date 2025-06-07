@@ -75,7 +75,6 @@ pub struct DiffLine {
     pub source_line_number: SourceLineNumber,
 }
 
-
 pub fn parse_header(header: &str) -> Option<(u16, u16, u16, u16)> {
     let re = Regex::new(r"@@ -(\d+),(\d+) \+(\d+),(\d+) @@").unwrap();
     if let Some(caps) = re.captures(header) {
