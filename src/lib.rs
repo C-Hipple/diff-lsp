@@ -1,4 +1,4 @@
-use log::info;
+use log::{debug, info};
 use regex::Regex;
 use std::collections::HashMap;
 use url::Url;
@@ -71,7 +71,6 @@ impl LineType {
 pub struct DiffLine {
     pub line_type: LineType,
     pub line: String,
-    pub pos_in_hunk: u16,
     pub source_line_number: SourceLineNumber,
 }
 
@@ -215,34 +214,6 @@ impl ParsedDiff {
         }
         None
     }
-
-    //     if let Some(hunk) = self.get_hunk_by_diff_line_number(line_num) {
-    //         if let Some(supported_file_type) = SupportedFileType::from_extension(hunk.file_type()) {
-    //             let pos_in_hunk: usize = (line_num - hunk.diff_location).into();
-    //             println!("map: pos_in_hunk: {:?}", pos_in_hunk);
-    //             println!("map: diff_location: {:?}", hunk.diff_location);
-    //             println!("map: start_new: {:?}", hunk.start_new);
-    //             return Some(SourceMap {
-    //                 file_name: hunk.filename,
-    //                 source_line: line_num - hunk.diff_location + hunk.start_new - 1, // LSP is 0 index.  Editors are 1 index.  Subtract 1 so they match
-    //                 // source_line: line_num - hunk.diff_location + hunk.start_new, // trying without 0 index?
-    //                 file_type: supported_file_type,
-    //                 source_line_type: hunk.changes[pos_in_hunk].line_type,
-    //                 source_line_text: hunk.changes[pos_in_hunk].line.clone(),
-    //             });
-    //         }
-    //     }
-    //     None
-    // }
-
-    // fn get_hunk_by_diff_line_number(&self, line_num: u16) -> Option<Hunk> {
-    //     for hunk in &self.hunks {
-    //         if line_num > hunk.diff_location && line_num <= hunk.diff_end() {
-    //             return Some(hunk.clone()); // is this going to shoot me in the foot?
-    //         }
-    //     }
-    //     None
-    // }
 }
 
 impl Parsable for ParsedDiff {
@@ -288,7 +259,6 @@ impl MagitDiff {
         let mut found_headers = false;
         let mut current_filename = "";
         let mut building_hunk = false;
-        let mut hunk_start = 0;
         let mut start_new: u16 = 0;
         let mut at_source_line: u16 = 0;
 
@@ -296,7 +266,7 @@ impl MagitDiff {
             if !found_headers {
                 let re = Regex::new(r"(\w+):\s+(.+)").unwrap();
                 if let Some(caps) = re.captures(line) {
-                    println!("{}", line);
+                    debug!("{}", line);
                     match DiffHeader::from_str(&caps[1]) {
                         Ok(header) => {
                             diff.headers.insert(header, caps[2].to_string());
@@ -315,17 +285,14 @@ impl MagitDiff {
                 }
                 if line.starts_with("@@") && !building_hunk {
                     building_hunk = true;
-                    hunk_start = i + 1; // diff_location doesn't include the @@ line
-                    println!("({:?}) Parsing Header `{}`", i, line);
+                    debug!("({:?}) Parsing Header `{}`", i, line);
                     start_new = parse_header(line).unwrap().2;
                     at_source_line = 0;
                     continue;
                 }
                 if (line.starts_with("@@") && building_hunk) || line.starts_with("Recent commits") {
-                    hunk_start = i + 1; // diff_location does not include the @@ line
-
                     if line.starts_with("@@") {
-                        println!("B: ({:?}) Setting Header: `{}`", i, line);
+                        debug!("B: ({:?}) Setting Header: `{}`", i, line);
                         start_new = parse_header(line).unwrap().2;
                         at_source_line = 0;
                         continue;
@@ -340,8 +307,6 @@ impl MagitDiff {
                     let diff_line = DiffLine {
                         line_type: line_type,
                         line: line.to_string(),
-                        pos_in_hunk: (i - hunk_start) as u16,
-                        // source_line_number: SourceLineNumber(start_new + ((i - hunk_start) as u16)),
                         source_line_number: SourceLineNumber(start_new + at_source_line),
                     };
 
@@ -350,14 +315,17 @@ impl MagitDiff {
                         (current_filename.to_string(), diff_line.clone()),
                     );
 
+                    debug!(
+                        "C: ({:?})Adding line @ {:?} `{}`",
+                        i + 1,
+                        diff_line.source_line_number.0,
+                        line
+                    );
+
                     if matches!(line_type, LineType::Added | LineType::Unmodified) {
                         at_source_line += 1;
                     }
 
-                    println!(
-                        "C: ({:?})Adding line @ {:?} `{}`",
-                        i, diff_line.source_line_number.0, line
-                    );
                     continue;
                 }
             }
@@ -396,8 +364,7 @@ impl CodeReviewDiff {
         let mut found_headers = false;
         let mut current_filename = "";
         let mut building_hunk = false;
-        let mut hunk_start = 0;
-        let mut start_new: u16 = 0;
+        let mut start_new: u16 = 0; // TODO new variable name
         let mut at_source_line: u16 = 0;
         let mut in_review = false;
 
@@ -405,7 +372,7 @@ impl CodeReviewDiff {
             if !found_headers {
                 let re = Regex::new(r"(\w+):\s+(.+)").unwrap();
                 if let Some(caps) = re.captures(line) {
-                    println!("{}", line);
+                    debug!("{}", line);
                     match DiffHeader::from_str(&caps[1]) {
                         Ok(header) => {
                             diff.headers.insert(header, caps[2].to_string());
@@ -424,17 +391,14 @@ impl CodeReviewDiff {
                 }
                 if line.starts_with("@@") && !building_hunk {
                     building_hunk = true;
-                    hunk_start = i + 1; // diff_location doesn't include the @@ line
-                    println!("({:?}) Parsing Header `{}`", i, line);
+                    debug!("({:?}) Parsing Header `{}`", i, line);
                     start_new = parse_header(line).unwrap().2;
                     at_source_line = 0;
                     continue;
                 }
                 if (line.starts_with("@@") && building_hunk) || line.starts_with("Recent commits") {
-                    hunk_start = i + 1; // diff_location does not include the @@ line
-
                     if line.starts_with("@@") {
-                        println!("B: ({:?}) Setting Header: `{}`", i, line);
+                        debug!("B: ({:?}) Setting Header: `{}`", i, line);
                         start_new = parse_header(line).unwrap().2;
                         at_source_line = 0;
                         continue;
@@ -445,16 +409,18 @@ impl CodeReviewDiff {
                 }
 
                 if building_hunk && line.starts_with("Reviewed by") {
+                    debug!("D: ({:?}) Review Start : {}", i, line);
                     in_review = true;
                     continue;
                 }
                 if in_review && line.starts_with("-------") {
+                    debug!("D: ({:?}) Review End: {}", i, line);
                     in_review = false;
                     continue;
                 }
 
                 if in_review {
-                    println!("D: ({:?})Review Comment: {}", i, line);
+                    debug!("D: ({:?}) Review Comment: {}", i, line);
                     continue;
                 }
 
@@ -463,23 +429,26 @@ impl CodeReviewDiff {
                     let diff_line = DiffLine {
                         line_type: line_type,
                         line: line.to_string(),
-                        pos_in_hunk: (i - hunk_start) as u16,
                         source_line_number: SourceLineNumber(start_new + at_source_line),
                     };
 
+                    // the i + 1 is because i is 0 index, but file lines are 1 index.
                     diff.lines_map.insert(
                         InputLineNumber::new((i + 1).try_into().unwrap()),
                         (current_filename.to_string(), diff_line.clone()),
+                    );
+
+                    debug!(
+                        "C: ({:?})Adding line @ {:?} `{}`",
+                        i + 1,
+                        diff_line.source_line_number.0,
+                        line
                     );
 
                     if matches!(line_type, LineType::Added | LineType::Unmodified) {
                         at_source_line += 1;
                     }
 
-                    println!(
-                        "C: ({:?})Adding line @ {:?} `{}`",
-                        i, diff_line.source_line_number.0, line
-                    );
                     continue;
                 }
             }

@@ -245,6 +245,12 @@ Reviewed by @C-Hipple - COMMENTED - May 24, 2025, 21:36
 +	if err != nil {
 +		fmt.Println("Error getting section: ", err, w.SectionTitle)
 +		return
+Reviewed by @C-Hipple - COMMENTED - May 24, 2025, 21:36
+    Early return?
+--------------
+Reviewed by @C-Hipple - COMMENTED - May 06, 2025, 21:40
+    creating a comment tree
+--------------
 +	}
 +	for _, pr := range prs {
 +		output := SyncTODOToSection(doc, pr, section)

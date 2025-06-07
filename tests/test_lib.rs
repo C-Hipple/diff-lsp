@@ -1,10 +1,37 @@
+// use std::io::{self, Write};
+
+struct SimpleLogger;
+
+// To use a logger in a test, add this line at the start of the test
+// let _ = log::set_logger(&LOGGER).map(|()| log::set_max_level(log::LevelFilter::Debug)); // Adjust level here too
+
+impl log::Log for SimpleLogger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= log::Level::Debug // Adjust level as needed
+    }
+
+    fn log(&self, record: &log::Record) {
+        // println!("logging");
+        if self.enabled(record.metadata()) {
+            // let mut stdout = io::stdout();
+            println!("[{}] {}", record.level(), record.args());
+        }
+    }
+
+    fn flush(&self) {}
+}
+
 #[cfg(test)]
 mod tests {
+    use super::SimpleLogger;
     use diff_lsp::{
         uri_from_relative_filename, CodeReviewDiff, DiffHeader, LineType, MagitDiff, Parsable,
         ParsedDiff, SourceLineNumber,
     };
     use std::fs;
+
+    #[allow(unused)]
+    static LOGGER: SimpleLogger = SimpleLogger;
 
     #[test]
     fn test_diff_type_selection() {
@@ -128,6 +155,7 @@ mod tests {
 
     #[test]
     fn test_parse_complex_code_review_buffer() {
+        // let _ = log::set_logger(&LOGGER).map(|()| log::set_max_level(log::LevelFilter::Debug)); // Adjust level here too
         let go_code_review_diff =
             fs::read_to_string("tests/data/full_go_diff.code_review").unwrap();
         let diff = ParsedDiff::parse(&go_code_review_diff).unwrap();
@@ -197,5 +225,32 @@ mod tests {
             "+\tsection, err := doc.GetSection(w.SectionTitle)"
         );
         assert_eq!(mapped.source_line, SourceLineNumber(75));
+
+        let mapped = diff.map_diff_line_to_src(247).unwrap();
+        println!("mapped: 247 {:?}", mapped);
+        assert_eq!(mapped.source_line, SourceLineNumber(78));
+        assert_eq!(mapped.source_line_text, "+\t\treturn");
+
+        // second comment (is a tree with 2 comments)
+        let mapped = diff.map_diff_line_to_src(248);
+        println!("mapped: 248 {:?}", mapped);
+        assert!(mapped.is_none());
+
+        let mapped = diff.map_diff_line_to_src(249);
+        println!("mapped: 249 {:?}", mapped);
+        assert!(mapped.is_none());
+
+        let mapped = diff.map_diff_line_to_src(250);
+        println!("mapped: 250 {:?}", mapped);
+        assert!(mapped.is_none());
+
+        let mapped = diff.map_diff_line_to_src(252);
+        println!("mapped: 252 {:?}", mapped);
+        assert!(mapped.is_none());
+
+        let mapped = diff.map_diff_line_to_src(254).unwrap();
+        println!("mapped: 254 {:?}", mapped);
+        assert_eq!(mapped.source_line, SourceLineNumber(79));
+        assert_eq!(mapped.source_line_text, "+\t}");
     }
 }
