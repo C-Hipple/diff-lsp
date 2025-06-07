@@ -66,6 +66,7 @@ impl LineType {
     }
 }
 
+/// A single line in a diff.
 #[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct DiffLine {
@@ -74,57 +75,6 @@ pub struct DiffLine {
     pub source_line_number: SourceLineNumber,
 }
 
-// #[allow(dead_code)]
-// #[derive(Default, Clone, Debug, PartialEq)]
-// pub struct Hunk {
-//     pub filename: String, // relative path, i.e. /src/client.rs
-//     pub start_old: u16,
-//     pub change_length_old: u16,
-//     pub start_new: u16, // consider s/new/modified
-//     pub change_length_new: u16,
-//     pub changes: Vec<DiffLine>,
-//     pub diff_location: u16, // Where the raw hunk starts (the @@ line) in the plain text diff.
-// }
-
-// impl Hunk {
-//     pub fn parse(
-//         header: &str,
-//         lines: Vec<DiffLine>,
-//         filename: String,
-//         diff_location: u16,
-//     ) -> Option<Hunk> {
-//         // NOTE: the last line of the last hunk is an empty line before the "recent commits" line...
-//         // unsure if it's a problem or not
-//         let re = Regex::new(r"@@ -(\d+),(\d+) \+(\d+),(\d+) @@").unwrap();
-//         if let Some(caps) = parse_header(header){
-//             return Some(Hunk {
-//                 filename: filename,
-//                 diff_location: diff_location,
-//                 start_old: caps.0,
-//                 change_length_old: caps.1,
-//                 start_new: caps.2,
-//                 change_length_new: caps.3,
-//                 changes: lines,
-//             });
-//         } else {
-//             return None;
-//         }
-//     }
-
-//     pub fn diff_length(&self) -> u16 {
-//         self.changes.len() as u16
-//     }
-
-//     pub fn diff_end(&self) -> u16 {
-//         self.diff_location + self.diff_length()
-//     }
-
-//     pub fn file_type(&self) -> String {
-//         // better not get any files with "." in them
-//         info!("Filename: {}", self.filename);
-//         self.filename.split_once('.').unwrap().1.to_string()
-//     }
-// }
 
 pub fn parse_header(header: &str) -> Option<(u16, u16, u16, u16)> {
     let re = Regex::new(r"@@ -(\d+),(\d+) \+(\d+),(\d+) @@").unwrap();
@@ -139,9 +89,9 @@ pub fn parse_header(header: &str) -> Option<(u16, u16, u16, u16)> {
     None
 }
 
+/// Reprepresents the data of a line in a diff.
 #[derive(Debug)]
 pub struct SourceMap {
-    // Return type when you translate a
     pub file_name: String,
     pub source_line: SourceLineNumber,
     pub file_type: SupportedFileType,
@@ -149,6 +99,8 @@ pub struct SourceMap {
     pub source_line_text: String,
 }
 
+/// The various information headers at the top of diffs which say what the diff
+/// was from, how it was generated.
 #[derive(EnumString, Hash, PartialEq, std::cmp::Eq, Debug, Clone)]
 pub enum DiffHeader {
     Project,
@@ -169,7 +121,7 @@ pub trait Parsable {
     // fn map_diff_line_to_src(&self, line_num: u16) -> Option<SourceMap>;
 }
 
-// InputLineNumber refers to a line number on the tempfile input that was initial parsed
+/// InputLineNumber refers to a line number on the tempfile input that was initial parsed
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct InputLineNumber(pub u16);
 
@@ -179,7 +131,7 @@ impl InputLineNumber {
     }
 }
 
-// SourceLineNumber refers to a line number on the source file that the diff is referring to.
+/// SourceLineNumber refers to a line number on the source file that the diff is referring to.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SourceLineNumber(pub u16);
 
@@ -200,7 +152,6 @@ pub struct ParsedDiff {
 
 impl ParsedDiff {
     pub fn map_diff_line_to_src(&self, line_num: u16) -> Option<SourceMap> {
-        // TODO: consider using an and_then chain? not sure if applicable
         if let Some((filename, diff_line)) = self.lines_map.get(&InputLineNumber::new(line_num)) {
             if let Some(file_type) = SupportedFileType::from_filename(filename.to_string()) {
                 return Some(SourceMap {
@@ -310,6 +261,7 @@ impl MagitDiff {
                         source_line_number: SourceLineNumber(start_new + at_source_line),
                     };
 
+                    // the i + 1 is because i is 0 index, but file lines are 1 index.
                     diff.lines_map.insert(
                         InputLineNumber::new((i + 1).try_into().unwrap()),
                         (current_filename.to_string(), diff_line.clone()),
@@ -334,6 +286,8 @@ impl MagitDiff {
     }
 }
 
+/// CodeReviewDiffs are the output of the code-review emacs package
+/// https//www.github.com/C-Hipple/code-review
 #[allow(dead_code)]
 #[derive(Default, Debug, Clone)]
 pub struct CodeReviewDiff {

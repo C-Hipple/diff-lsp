@@ -202,8 +202,6 @@ mod tests {
         assert_eq!(mapped.source_line_type, LineType::Added);
         assert_eq!(mapped.file_name, "workflows/review_workflow.go".to_string());
 
-        // Before the comment
-
         // Around the comment
         let mapped = diff.map_diff_line_to_src(241);
         println!("mapped: 241 {:?}", mapped);
