@@ -1,0 +1,274 @@
+Project: *Code Review*
+Root: /home/chris/gtdbot/
+Buffer: gtdbot
+Type: code-review
+Author:          @C-Hipple
+Title:           Dev/add more details pr org bridge
+State:           MERGED
+Refs:            main ... dev/add-more-details-pr-org-bridge
+Milestone:       No milestone
+Labels:          None yet
+Projects:        None yet
+Draft:           false
+Assignees:       No one — Assign yourself
+Suggested-Reviewers: No suggestions
+Reviewers:
+
+Commits (15)
+6972b92 deatil :x: Expand for Details (1)
+        Test and Lint / nil - nil  :x: Details
+95b7ee2 add requested :x: Expand for Details (1)
+        Test and Lint / nil - nil  :x: Details
+0202e09 include teams :white_check_mark: Expand for Details (1)
+        Test and Lint / build - Successful in 41.0s.  :white_check_mark: Details
+31178e8 Merge branch 'dev/add-more-details-pr-org-bridge' of github.com:C-Hipple/gtdbot into dev/add-more-details-pr-org-bridge :white_check_mark: Expand for Details (1)
+        Test and Lint / build - Successful in 38.0s.  :white_check_mark: Details
+8d95c10 add cleaning
+7dbf8ea Merge branch 'dev/add-more-details-pr-org-bridge' of github.com:/C-Hipple/gtdbot into dev/add-more-details-pr-org-bridge :x: Expand for Details (1)
+        Test and Lint / nil - nil  :x: Details
+129c817 Merge branch 'dev/add-more-details-pr-org-bridge' of github.com:C-Hipple/gtdbot into dev/add-more-details-pr-org-bridge :x: Expand for Details (1)
+        Test and Lint / nil - nil  :x: Details
+b7d9a7c remove lines then add new ones :x: Expand for Details (1)
+        Test and Lint / nil - nil  :x: Details
+01a82fb lint :white_check_mark: Expand for Details (1)
+        Test and Lint / build - Successful in 43.0s.  :white_check_mark: Details
+1db2f9c everything is multiple repo :x: Expand for Details (1)
+        Test and Lint / nil - nil  :x: Details
+0620bd2 Merge branch 'dev/add-more-details-pr-org-bridge' of github.com:C-Hipple/gtdbot into dev/add-more-details-pr-org-bridge :x: Expand for Details (1)
+        Test and Lint / nil - nil  :x: Details
+0cb7379 make single repo workflow :white_check_mark: Expand for Details (1)
+        Test and Lint / build - Successful in 40.0s.  :white_check_mark: Details
+c4db888 finalize single repo wrokflow :white_check_mark: Expand for Details (1)
+        Test and Lint / build - Successful in 38.0s.  :white_check_mark: Details
+137d1dd Merge branch 'main' of github.com:/C-Hipple/gtdbot into dev/add-more-details-pr-org-bridge :x: Expand for Details (1)
+        Test and Lint / nil - nil  :x: Details
+5c8007f fix conflict :white_check_mark: Expand for Details (1)
+        Test and Lint / build - Successful in 40.0s.  :white_check_mark: Details
+
+Description
+
+No description provided.
+
+Your Review Feedback
+Leave a comment here.
+
+Conversation
+No conversation found.
+
+Files changed (4 files; 74 additions, 52 deletions)
+
+modified   config.go
+@@ -48,25 +48,28 @@ func LoadConfig() Config {  // in 1 index land, the empty line below this is line 48
+
+    return Config{
+        Repos:     intermediate_config.Repos,
+-		Workflows: MatchWorkflows(intermediate_config.Workflows),
++		Workflows: MatchWorkflows(intermediate_config.Workflows, &intermediate_config.Repos),
+    }
+ }
+
+-func MatchWorkflows(workflow_maps []RawWorkflow) []workflows.Workflow {
++func MatchWorkflows(workflow_maps []RawWorkflow, repos *[]string) []workflows.Workflow {
+    workflows := []workflows.Workflow{}
+    for _, raw_workflow := range workflow_maps {
+        if raw_workflow.WorkflowType == "SyncReviewRequestsWorkflow" {
+-			workflows = append(workflows, BuildSyncReviewRequestWorkflow(&raw_workflow))
++			workflows = append(workflows, BuildSyncReviewRequestWorkflow(&raw_workflow, repos))
++		}
++		if raw_workflow.WorkflowType == "SingleRepoSyncReviewRequestsWorkflow" {
++			workflows = append(workflows, BuildSingleRepoReviewWorkflow(&raw_workflow, repos))
+        }
+        if raw_workflow.WorkflowType == "ListMyPRsWorkflow" {
+-			workflows = append(workflows, BuildListMyPRsWorkflow(&raw_workflow))
++			workflows = append(workflows, BuildListMyPRsWorkflow(&raw_workflow, repos))
+        }
+    }
+    return workflows
+ }
+
+-func BuildSyncReviewRequestWorkflow(raw *RawWorkflow) workflows.Workflow {
+-	wf := workflows.SyncReviewRequestsWorkflow{
++func BuildSingleRepoReviewWorkflow(raw *RawWorkflow, repos *[]string) workflows.Workflow {
++	wf := workflows.SingleRepoSyncReviewRequestsWorkflow{
+        Name:         raw.Name,
+        Owner:        raw.Owner,
+        Repo:         raw.Repo,
+@@ -77,11 +80,23 @@ func BuildSyncReviewRequestWorkflow(raw *RawWorkflow) workflows.Workflow {
+    return wf
+ }
+
+-func BuildListMyPRsWorkflow(raw *RawWorkflow) workflows.Workflow {
++func BuildSyncReviewRequestWorkflow(raw *RawWorkflow, repos *[]string) workflows.Workflow {
++	wf := workflows.SyncReviewRequestsWorkflow{
++		Name:         raw.Name,
++		Owner:        raw.Owner,
++		Repos:        *repos,
++		Filters:      BuildFiltersList(raw.Filters),
++		OrgFileName:  raw.OrgFileName,
++		SectionTitle: raw.SectionTitle,
++	}
++	return wf
++}
++
++func BuildListMyPRsWorkflow(raw *RawWorkflow, repos *[]string) workflows.Workflow {
+    wf := workflows.ListMyPRsWorkflow{
+        Name:         raw.Name,
+        Owner:        raw.Owner,
+-		Repos:        raw.Repos,
++		Repos:        *repos,
+        PRState:      raw.PRState,
+        OrgFileName:  raw.OrgFileName,
+        SectionTitle: raw.SectionTitle,
+
+modified   git_tools/git_tools.go
+@@ -18,47 +18,6 @@ import (
+ type PullRequest interface {
+ }
+
+-func github_main() {
+-	// silly little tester function
+-	ctx := context.Background()
+-	token := os.Getenv("GTDBOT_GITHUB_TOKEN")
+-	if token == "" {
+-		panic("Unable to get Github Token!")
+-	}
+-	ts := oauth2.StaticTokenSource(
+-		&oauth2.Token{AccessToken: token},
+-	)
+-	tc := oauth2.NewClient(ctx, ts)
+-
+-	client := github.NewClient(tc)
+-
+-	// list all repositories for the authenticated user
+-	repos, _, err := client.Repositories.List(ctx, "", nil)
+-	if err != nil {
+-		fmt.Println("Error!", err)
+-		os.Exit(1)
+-	}
+-	fmt.Println(len(repos))
+-	// for _, repo := range repos {
+-	//	fmt.Println(*repo.Name)
+-	// }
+-	//pr, _, err2 := client.PullRequests.Get(ctx, "C-Hipple", "C-Hipple.github.io", 1)
+-	pr, _, err2 := client.PullRequests.Get(ctx, "C-Hipple", "gtdbot", 4)
+-	if err2 != nil {
+-		fmt.Println("Error on getting PR: ", err2)
+-	}
+-	fmt.Println(*pr.User.Login)
+-	//fmt.Println(*pr.Body)
+-	//*pr.Body = strings.Replace(*pr.Body, "desc", new string, n int)
+-
+-	//client.PullRequests.Edit(ctx, "C-Hipple", "C-Hipple.github.io", 1, pr)
+-	// client.PullRequests.Edit(ctx, "C-Hipple", "gtdbot", 4, pr)
+-	prs := GetPRs(client, "open", "C-Hipple", "gtdbot")
+-	for _, pr := range prs {
+-		fmt.Println(*pr.Title)
+-	}
+-}
+-
+ type PRFilter func([]*github.PullRequest) []*github.PullRequest
+
+ func GetPRs(client *github.Client, state string, owner string, repo string) []*github.PullRequest {
+
+modified   workflows/logic.go
+@@ -99,6 +99,11 @@ func getTeamName(reviewer *github.Team) string {
+
+ func escapeBody(body *string) string {
+    // Body comes in a single string with newlines and can have things that break orgmode like *
++	if body == nil {
++		// pretty sure the library uses json:omitempty?
++		return ""
++	}
++
+    lines := strings.Split(*body, "\n")
+    if len(lines) == 0 {
+        return ""
+
+modified   workflows/review_workflow.go
+@@ -7,7 +7,7 @@ import (
+    "sync"
+ )
+
+-type SyncReviewRequestsWorkflow struct {
++type SingleRepoSyncReviewRequestsWorkflow struct {
+    // Github repo info
+    Name    string
+    Owner   string
+@@ -19,8 +19,13 @@ type SyncReviewRequestsWorkflow struct {
+    SectionTitle string
+ }
+
+-func (w SyncReviewRequestsWorkflow) Run(c chan FileChanges, wg *sync.WaitGroup) {
++func (w SingleRepoSyncReviewRequestsWorkflow) GetName() string {
++	return w.Name
++}
++
++func (w SingleRepoSyncReviewRequestsWorkflow) Run(c chan FileChanges, wg *sync.WaitGroup) {
+    defer wg.Done()
++
+    prs := git_tools.GetPRs(
+        git_tools.GetGithubClient(),
+        "open",
+@@ -42,14 +47,52 @@ func (w SyncReviewRequestsWorkflow) Run(c chan FileChanges, wg *sync.WaitGroup)
+    }
+ }
+
++type SyncReviewRequestsWorkflow struct {
++	// Github repo info
++	Name    string
++	Owner   string
++	Repos   []string
++	Filters []git_tools.PRFilter
++
++	// org output info
++	OrgFileName  string
++	SectionTitle string
++}
++
++func (w SyncReviewRequestsWorkflow) Run(c chan FileChanges, wg *sync.WaitGroup) {
++	defer wg.Done()
++
++	client := git_tools.GetGithubClient()
++	prs := git_tools.GetManyRepoPRs(client, "open", w.Owner, w.Repos)
++	// prs := git_tools.GetPRs(
++	//	git_tools.GetGithubClient(),
++	//	"open",
++	//	w.Owner,
++	//	w.Repo,
++	// )
++	prs = git_tools.ApplyPRFilters(prs, w.Filters)
++	doc := org.GetBaseOrgDocument(w.OrgFileName)
+Reviewed by @C-Hipple - COMMENTED - May 24, 2025, 21:36
+    i wonder if the doc can be a lazy feature of the workflow class?
+--------------
++	section, err := doc.GetSection(w.SectionTitle)
++	if err != nil {
++		fmt.Println("Error getting section: ", err, w.SectionTitle)
++		return
+Reviewed by @C-Hipple - COMMENTED - May 24, 2025, 21:36
+    Early return?
+--------------
+Reviewed by @C-Hipple - COMMENTED - May 06, 2025, 21:40
+    creating a comment tree
+--------------
++	}
++	for _, pr := range prs {
++		output := SyncTODOToSection(doc, pr, section)
++		if output.ChangeType != "No Change" {
++			c <- output
++		}
++	}
++}
++
+ func (w SyncReviewRequestsWorkflow) GetName() string {
+    return w.Name
+ }
+
+ type ListMyPRsWorkflow struct {
+    Name            string
+-	Repos           []string
+    Owner           string
++	Repos           []string
+    OrgFileName     string
+    SectionTitle    string
+    PRState         string

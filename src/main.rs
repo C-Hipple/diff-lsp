@@ -1,6 +1,5 @@
-use std::fs::{read_to_string, remove_file, OpenOptions};
+use std::fs::{remove_file, OpenOptions};
 
-use regex::Regex;
 use std::io::prelude::*;
 use std::path::PathBuf;
 
@@ -9,11 +8,13 @@ use expanduser::expanduser;
 use log::{info, Level, LevelFilter, Log, Metadata, Record, SetLoggerError};
 use tower_lsp::{LspService, Server};
 
-use diff_lsp::server::{get_backends_map, DiffLsp};
+use diff_lsp::server::{create_backends_map, read_initialization_params_from_tempfile, DiffLsp};
+
+const LOG_FILE_PATH: &str = "~/.diff-lsp.log";
 
 fn logfile_path() -> PathBuf {
-    println!("setting logfile path");
-    expanduser("~/.diff-lsp.log").unwrap()
+    // println!("setting logfile path");
+    expanduser(LOG_FILE_PATH).unwrap()
 }
 
 struct FileLogger;
@@ -59,28 +60,17 @@ impl Log for FileLogger {
 
 static LOGGER: FileLogger = FileLogger;
 
-pub fn init() -> Result<(), SetLoggerError> {
+pub fn initialize_logger() -> Result<(), SetLoggerError> {
     log::set_logger(&LOGGER).map(|()| log::set_max_level(LevelFilter::Info))
 }
 
 #[tokio::main]
 async fn main() {
-    let _ = init().unwrap();
+    let _ = initialize_logger().unwrap();
     let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
     let tempfile_path = expanduser("~/.diff-lsp-tempfile").unwrap();
-    let mut cwd = String::new();
-    if let Ok(input) = read_to_string(tempfile_path) {
-        let re = Regex::new(r"^Root:\s(.*)").unwrap();
-        for line in input.lines() {
-            if let Some(caps) = re.captures(line) {
-                cwd = caps.get(1).unwrap().as_str().to_string();
-                break;
-            }
-        }
-    } else {
-        panic!("Unable to read coordination temp-file")
-    }
-    let backends = get_backends_map(&cwd);
+    let (cwd, langs) = read_initialization_params_from_tempfile(&tempfile_path).unwrap();
+    let backends = create_backends_map(langs, &cwd);
     let (diff_lsp_service, socket) =
         LspService::new(|client| DiffLsp::new(client, backends, cwd.to_string()));
 
