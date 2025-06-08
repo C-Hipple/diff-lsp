@@ -1,5 +1,11 @@
 check:
 	@failed=0; \
+	echo "Compiling"; \
+	cargo build; \
+	if [ $$? -ne 0 ]; then \
+		echo "Formatter Check Failed."; \
+		failed=1; \
+	fi; \
 	echo "Running format check"; \
 	cargo fmt --check; \
 	if [ $$? -ne 0 ]; then \

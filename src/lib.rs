@@ -3,8 +3,6 @@ use regex::Regex;
 use std::collections::HashMap;
 use url::Url;
 
-// use log::info;
-
 use std::str::FromStr;
 use strum_macros::EnumString;
 
@@ -30,7 +28,11 @@ impl SupportedFileType {
     }
 
     pub fn from_filename(filename: String) -> Option<SupportedFileType> {
-        SupportedFileType::from_extension(filename.split_once('.').unwrap().1.to_string())
+        info!("checking filename: {:?}", filename);
+        filename
+            .split_once('.')
+            .map(|(name, extension)| extension.to_string())
+            .and_then(|extension| SupportedFileType::from_extension(extension))
     }
 }
 
