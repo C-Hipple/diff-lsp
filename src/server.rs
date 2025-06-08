@@ -167,10 +167,14 @@ impl DiffLsp {
         res
     }
 
-    async fn get_source_map(&self, text_params: TextDocumentPositionParams) -> Option<SourceMap> {
-        let line = text_params.position.line.try_into().unwrap();
+    fn map_params() {
+        
+    }
+
+    async fn get_source_map<T: Mappable>(&self, input: T) -> Option<SourceMap> {
+        let line = input.get_line();
         return self
-            .line_to_source_map(text_params.text_document.uri.clone(), line)
+            .line_to_source_map(input.get_uri(), line)
             .await;
     }
 
@@ -455,5 +459,20 @@ impl LanguageServer for DiffLsp {
             Ok(res) => Ok(res),
             Err(_) => Err(LspError::new(ErrorCode::ServerError(1))), // Translating LspError type
         }
+    }
+
+}
+
+trait Mappable {
+    fn get_line(&self) -> u16;
+    fn get_uri(&self) -> Url;
+}
+
+impl Mappable for TextDocumentPositionParams {
+    fn get_line(&self) -> u16 {
+        self.position.line.try_into().unwrap()
+    }
+    fn get_uri(&self) -> Url {
+        self.text_document.uri.clone()
     }
 }

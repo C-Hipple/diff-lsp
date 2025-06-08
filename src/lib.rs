@@ -31,7 +31,7 @@ impl SupportedFileType {
         info!("checking filename: {:?}", filename);
         filename
             .split_once('.')
-            .map(|(name, extension)| extension.to_string())
+            .map(|(_name, extension)| extension.to_string())
             .and_then(|extension| SupportedFileType::from_extension(extension))
     }
 }
