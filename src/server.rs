@@ -353,7 +353,7 @@ impl LanguageServer for DiffLsp {
                 let mut these_params = params.clone();
                 // Here we need to break the LSP contract and use the originator's didOpen URI to read the contents of the file.
 
-                info!("filename: {:?}", filename.clone());
+                info!("Opening filename: {:?}", filename.clone());
                 let full_path = self.root.clone() + "/" + &filename;
                 let text = fs::read_to_string(full_path).unwrap();
 
