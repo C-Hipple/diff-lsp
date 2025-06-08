@@ -26,12 +26,23 @@ mod tests {
     use super::SimpleLogger;
     use diff_lsp::{
         uri_from_relative_filename, CodeReviewDiff, DiffHeader, LineType, MagitDiff, Parsable,
-        ParsedDiff, SourceLineNumber,
+        ParsedDiff, SourceLineNumber, SupportedFileType,
     };
     use std::fs;
 
     #[allow(unused)]
     static LOGGER: SimpleLogger = SimpleLogger;
+
+    #[test]
+    fn test_supported_file_type_from_filename() {
+        assert_eq!(SupportedFileType::from_filename("Makefile".to_string()), None);
+        assert_eq!(SupportedFileType::from_filename("hi.py".to_string()), Some(SupportedFileType::Python));
+        assert_eq!(SupportedFileType::from_filename("test.hi.py".to_string()), Some(SupportedFileType::Python));
+        assert_eq!(SupportedFileType::from_filename("test.hi.rs".to_string()), Some(SupportedFileType::Rust));
+        assert_eq!(SupportedFileType::from_filename("main.rs".to_string()), Some(SupportedFileType::Rust));
+        assert_eq!(SupportedFileType::from_filename("main.go".to_string()), Some(SupportedFileType::Go));
+        assert_eq!(SupportedFileType::from_filename("go".to_string()), None);
+    }
 
     #[test]
     fn test_diff_type_selection() {

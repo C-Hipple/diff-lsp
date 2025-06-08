@@ -4,13 +4,13 @@ use std::collections::HashMap;
 use url::Url;
 
 use std::str::FromStr;
-use strum_macros::EnumString;
+use strum_macros::{EnumIter, EnumString};
 
 pub mod client;
 pub mod server;
 pub mod utils;
 
-#[derive(Debug, Hash, PartialEq, std::cmp::Eq, Copy, Clone)]
+#[derive(Debug, Hash, PartialEq, std::cmp::Eq, Copy, Clone, EnumIter)]
 pub enum SupportedFileType {
     Rust,
     Go,
@@ -28,15 +28,17 @@ impl SupportedFileType {
     }
 
     pub fn from_filename(filename: String) -> Option<SupportedFileType> {
-        info!("checking filename: {:?}", filename);
         filename
-            .split_once('.')
-            .map(|(name, extension)| extension.to_string())
+            .rsplit_once('.')
+            .map(|(_name, extension)| extension.to_string())
             .and_then(|extension| SupportedFileType::from_extension(extension))
     }
+
 }
 
 pub fn get_lsp_for_file_type(file_type: SupportedFileType) -> Option<String> {
+    // TBH no idea why this is an Option type.  Maybe I should check that these
+    // actually exist on the machine running lsp?
     match file_type {
         SupportedFileType::Rust => Some("rust-analyzer".to_string()),
         SupportedFileType::Go => Some("gopls".to_string()),
@@ -60,7 +62,8 @@ pub enum LineType {
 impl LineType {
     pub fn from_line(line: &str) -> Self {
         match line.chars().next() {
-            // Could technically be bugger if it's a diff and the first char is 1 of these and it's unmodified
+            // Could technically be bugger if it's a diff and the first char
+            // is 1 of these and it's unmodified
             Some('+') => LineType::Added,
             Some('-') => LineType::Removed,
             _ => LineType::Unmodified,
@@ -232,7 +235,7 @@ impl MagitDiff {
                 // found headers, moving onto hunks
                 if line.starts_with("modified") {
                     current_filename = line.split_whitespace().nth(1).unwrap();
-                    info!("Current filename when parsing: {:?}", current_filename);
+                    debug!("Current filename when parsing: {:?}", current_filename);
                     diff.filenames.push(current_filename.to_string());
                 }
                 if line.starts_with("@@") && !building_hunk {

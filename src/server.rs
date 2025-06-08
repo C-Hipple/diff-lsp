@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use strum::IntoEnumIterator;
 use std::fs::read_to_string;
 
 use log::info;
@@ -54,28 +55,19 @@ pub fn create_backends_map(
     let mut backends: HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>> =
         HashMap::new();
 
-    if active_langs.contains(&SupportedFileType::Rust) {
-        info!("Starting Rust Analyzer");
-        backends.insert(
-            SupportedFileType::Rust,
-            Arc::new(Mutex::new(client::ClientForBackendServer::new(
-                "rust-analyzer".to_string(),
-                dir,
-            ))),
-        );
+    for supported_lang in SupportedFileType::iter() {
+        if active_langs.contains(&supported_lang) {
+            let command = get_lsp_for_file_type(supported_lang).unwrap();
+            info!("Starting client for server: {:?}", command);
+            backends.insert(
+                supported_lang,
+                Arc::new(Mutex::new(client::ClientForBackendServer::new(
+                    command,
+                    dir,
+                ))),
+            );
+        }
     }
-
-    if active_langs.contains(&SupportedFileType::Go) {
-        info!("Starting Gopls");
-        backends.insert(
-            SupportedFileType::Go,
-            Arc::new(Mutex::new(client::ClientForBackendServer::new(
-                "gopls".to_string(),
-                dir,
-            ))),
-        );
-    }
-    // backends.insert(SupportedFileType::Python, Arc::new(Mutex::new(pylsp)));
     backends
 }
 
@@ -87,7 +79,6 @@ pub fn read_initialization_params_from_tempfile(
         let mut file_types: Vec<SupportedFileType> = vec![];
         let root_regex = Regex::new(r"^Root:\s(.*)").unwrap();
         let file_regex = Regex::new(r"^(modified|new file|deleted)\s+(.*)").unwrap();
-        // let file_regex = Regex::new(r"^(modified|new file|deleted):\s+(.*)").unwrap();
         for line in input.lines() {
             if let Some(caps) = root_regex.captures(line) {
                 cwd = caps.get(1).unwrap().as_str().to_string();
@@ -111,8 +102,6 @@ pub fn read_initialization_params_from_tempfile(
 pub struct DiffLsp {
     pub client: Client,
     pub backends: HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>>,
-    //pub diff:   // Implements the mapping functions too?
-    // pub diff: Option<ParsedDiff>,
     pub diff_map: Mutex<HashMap<Url, ParsedDiff>>,
     pub root: String, // The project root, without a trailing slash.  ~/diff-lsp for example
 }
@@ -132,7 +121,7 @@ impl DiffLsp {
                 let diff_path = expanduser("~/.diff-lsp-tempfile").unwrap();
 
                 let contents = fs::read_to_string(diff_path.clone()).unwrap();
-                let diff = MagitDiff::parse(&contents); // TODO determine type from contents
+                let diff = ParsedDiff::parse(&contents);
                 let str_diff_path = diff_path.to_str().unwrap();
                 map.insert(Url::from_file_path(str_diff_path).unwrap(), diff.unwrap());
                 map
