@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use strum::IntoEnumIterator;
 use std::fs::read_to_string;
+use strum::IntoEnumIterator;
 
 use log::info;
 use std::collections::HashMap;
@@ -62,8 +62,7 @@ pub fn create_backends_map(
             backends.insert(
                 supported_lang,
                 Arc::new(Mutex::new(client::ClientForBackendServer::new(
-                    command,
-                    dir,
+                    command, dir,
                 ))),
             );
         }
@@ -148,12 +147,7 @@ impl DiffLsp {
 
     async fn get_diff(&self, uri: &Url) -> Option<ParsedDiff> {
         let map = self.diff_map.lock().await;
-        let res = map.get(&uri).cloned();
-        // info!("Searched for the diff via {:?}, got {:?}",
-        //     uri.as_str(),
-        //     res
-        // );
-        res
+        map.get(&uri).cloned()
     }
 
     async fn get_source_map(&self, text_params: TextDocumentPositionParams) -> Option<SourceMap> {
@@ -165,10 +159,39 @@ impl DiffLsp {
 
     async fn line_to_source_map(&self, uri: Url, line_num: u16) -> Option<SourceMap> {
         if let Some(diff) = self.get_diff(&uri).await {
-            info!("Found the diff at URI: {:?}", uri.clone());
+            // info!("Found the diff at URI: {:?}", uri.clone());
+            info!("Used diff line count {:?}", diff.lines_map.len());
+            info!("Used diff line parsed at {:?}", diff.parsed_at);
             return diff.map_diff_line_to_src(line_num);
         }
+        info!("Failed to find diff at URI: {:?}", uri.clone());
         None
+    }
+
+    async fn refresh_file(&self, uri: Url) -> Option<ParsedDiff> {
+        let real_path = uri.path();
+        info!("Calling refresh_file for the real path: {:?}", real_path);
+
+        let contents = fs::read_to_string(real_path).unwrap();
+        if let Some(diff) = ParsedDiff::parse(&contents) {
+            info!("Inserting diff! 2");
+            let mut diff_map = self.diff_map.lock().await;
+
+            if let Some(diff_before) = diff_map.get(&uri) {
+                info!("Diff before len: {:?}", diff_before.lines_map.len());
+            }
+            info!("Diff new len: {:?}", diff.lines_map.len());
+
+            diff_map.insert(uri.clone(), diff.clone()); // Use the *same* lock to insert
+            // self.diff_map = diff_map;
+            // if let Some(diff_after) = diff_after {
+                                                        //     info!("Diff after len: {:?}", diff_after.lines_map.len());
+                                                        // }
+
+            Some(diff)
+        } else {
+            None
+        }
     }
 }
 
@@ -257,7 +280,11 @@ impl LanguageServer for DiffLsp {
         //      contents: HoverContents::Scalar(MarkedString::from_markdown("Hover Text".to_string())),
         //      range: None,
         // };
-        info!("Doing hover: {:?}", params);
+        info!(
+            "Doing hover: {:?}-{:?}",
+            params.text_document_position_params.position.line,
+            params.text_document_position_params.position.character
+        );
         let source_map_res = self
             .get_source_map(params.text_document_position_params.clone())
             .await;
@@ -270,7 +297,7 @@ impl LanguageServer for DiffLsp {
             }
         };
 
-        info!("source map: {:?}", source_map);
+        info!("source map: {:?} - {:?}", source_map.source_line, source_map.source_line_text);
         let backend_mutex_res = self.get_backend(&source_map);
         let backend_mutex = match backend_mutex_res {
             Some(bm) => bm,
@@ -297,9 +324,7 @@ impl LanguageServer for DiffLsp {
                 .character -= 1
         }
 
-        // Accounting for this elsewhere
-        //mapped_params.text_document_position_params.position.line += 1;  // the lsp client is 0 indexing
-        info!("Hover mapped params: {:?}", mapped_params);
+        // info!("Hover mapped params: {:?}", mapped_params);
         let hov_res = backend.hover(mapped_params);
         match hov_res {
             Ok(res) => Ok(res),
@@ -309,53 +334,35 @@ impl LanguageServer for DiffLsp {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         // info!("Opened document: {:?}", params);  // uncomment to show that we get diff-test as our did open, but we send the real file to the backend
-        let real_path = params.text_document.uri.path();
-        // let real_path = params.text_document.text.clone();
+        if let Some(diff) = self.refresh_file(params.text_document.uri.clone()).await {
+            let filtered_files: Vec<String> = diff.filenames.clone().into_iter().unique().collect();
+            for filename in filtered_files {
+                let filetype = SupportedFileType::from_filename(filename.clone());
 
-        // get all the paths from all the diffs
+                if let None = filetype {
+                    continue;
+                }
 
-        info!(
-            "Calling did_open {:?} for the real path: {:?}",
-            params, real_path
-        );
+                if let Some(backend_mutex) = self.backends.get(&filetype.unwrap()) {
+                    let mut backend = backend_mutex.lock().await;
+                    let mut these_params = params.clone();
+                    // Here we need to break the LSP contract and use the originator's didOpen URI to read the contents of the file.
 
-        let contents = fs::read_to_string(real_path).unwrap();
-        let diff = ParsedDiff::parse(&contents).unwrap();
-        let filtered_files: Vec<String> = diff.filenames.clone().into_iter().unique().collect();
+                    info!("Opening filename: {:?}", filename.clone());
+                    let full_path = self.root.clone() + "/" + &filename;
+                    let text = fs::read_to_string(full_path).unwrap();
 
-        self.diff_map
-            .lock()
-            .await
-            .insert(params.text_document.uri.clone(), diff);
-
-        // not sure how to type hint the Vec<String> doing this in the loop constructor
-        // TODO filter by filetype?
-        for filename in filtered_files {
-            let filetype = SupportedFileType::from_filename(filename.clone());
-
-            if let None = filetype {
-                continue;
-            }
-
-            if let Some(backend_mutex) = self.backends.get(&filetype.unwrap()) {
-                let mut backend = backend_mutex.lock().await;
-                let mut these_params = params.clone();
-                // Here we need to break the LSP contract and use the originator's didOpen URI to read the contents of the file.
-
-                info!("Opening filename: {:?}", filename.clone());
-                let full_path = self.root.clone() + "/" + &filename;
-                let text = fs::read_to_string(full_path).unwrap();
-
-                these_params.text_document.uri =
-                    uri_from_relative_filename(self.root.clone(), &filename);
-                these_params.text_document.text = text;
-                info!(
-                    "Calling Did open to {:?} for file {:?}; with text: {:?}",
-                    backend.lsp_command,
-                    these_params.text_document.uri.as_str(),
-                    these_params.text_document.text
-                );
-                backend.did_open(&these_params);
+                    these_params.text_document.uri =
+                        uri_from_relative_filename(self.root.clone(), &filename);
+                    these_params.text_document.text = text;
+                    info!(
+                        "Calling Did open to {:?} for file {:?}; with text: {:?}",
+                        backend.lsp_command,
+                        these_params.text_document.uri.as_str(),
+                        these_params.text_document.text
+                    );
+                    backend.did_open(&these_params);
+                }
             }
         }
         info!("Finished did_open");
@@ -366,7 +373,8 @@ impl LanguageServer for DiffLsp {
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        info!("Calling did_close {:?}", params)
+        info!("Calling did_close {:?}", params);
+        self.refresh_file(params.text_document.uri).await;
     }
 
     async fn references(&self, _params: ReferenceParams) -> LspResult<Option<Vec<Location>>> {

@@ -1,7 +1,8 @@
-use log::{debug, info};
+use log::info;
 use regex::Regex;
 use std::collections::HashMap;
 use url::Url;
+use chrono::{DateTime, Utc};
 
 use std::str::FromStr;
 use strum_macros::{EnumIter, EnumString};
@@ -152,6 +153,7 @@ pub struct ParsedDiff {
     pub filenames: Vec<String>, // relative path, i.e. /src/client.rs
     // maps the line of the actual source file (after teh diff was applied to FileName, DiffLine tuple)
     pub lines_map: HashMap<InputLineNumber, (String, DiffLine)>,
+    pub parsed_at: DateTime<Utc>, // used for debugging my server
 }
 
 impl ParsedDiff {
@@ -200,6 +202,7 @@ impl Parsable for MagitDiff {
                 headers: magit_diff.headers,
                 filenames: magit_diff.filenames,
                 lines_map: magit_diff.lines_map,
+                parsed_at: Utc::now(),
             });
         }
         None
@@ -221,7 +224,7 @@ impl MagitDiff {
             if !found_headers {
                 let re = Regex::new(r"(\w+):\s+(.+)").unwrap();
                 if let Some(caps) = re.captures(line) {
-                    debug!("{}", line);
+                    info!("{}", line);
                     match DiffHeader::from_str(&caps[1]) {
                         Ok(header) => {
                             diff.headers.insert(header, caps[2].to_string());
@@ -235,19 +238,19 @@ impl MagitDiff {
                 // found headers, moving onto hunks
                 if line.starts_with("modified") {
                     current_filename = line.split_whitespace().nth(1).unwrap();
-                    debug!("Current filename when parsing: {:?}", current_filename);
+                    info!("Current filename when parsing: {:?}", current_filename);
                     diff.filenames.push(current_filename.to_string());
                 }
                 if line.starts_with("@@") && !building_hunk {
                     building_hunk = true;
-                    debug!("({:?}) Parsing Header `{}`", i, line);
+                    info!("({:?}) Parsing Header `{}`", i, line);
                     start_new = parse_header(line).unwrap().2;
                     at_source_line = 0;
                     continue;
                 }
                 if (line.starts_with("@@") && building_hunk) || line.starts_with("Recent commits") {
                     if line.starts_with("@@") {
-                        debug!("B: ({:?}) Setting Header: `{}`", i, line);
+                        info!("B: ({:?}) Setting Header: `{}`", i, line);
                         start_new = parse_header(line).unwrap().2;
                         at_source_line = 0;
                         continue;
@@ -271,7 +274,7 @@ impl MagitDiff {
                         (current_filename.to_string(), diff_line.clone()),
                     );
 
-                    debug!(
+                    info!(
                         "C: ({:?})Adding line @ {:?} `{}`",
                         i + 1,
                         diff_line.source_line_number.0,
@@ -309,6 +312,7 @@ impl Parsable for CodeReviewDiff {
                 headers: cr_diff.headers,
                 filenames: cr_diff.filenames,
                 lines_map: cr_diff.lines_map,
+                parsed_at: Utc::now(),
             });
         }
         None
@@ -330,7 +334,7 @@ impl CodeReviewDiff {
             if !found_headers {
                 let re = Regex::new(r"(\w+):\s+(.+)").unwrap();
                 if let Some(caps) = re.captures(line) {
-                    debug!("{}", line);
+                    info!("{}", line);
                     match DiffHeader::from_str(&caps[1]) {
                         Ok(header) => {
                             diff.headers.insert(header, caps[2].to_string());
@@ -349,14 +353,14 @@ impl CodeReviewDiff {
                 }
                 if line.starts_with("@@") && !building_hunk {
                     building_hunk = true;
-                    debug!("({:?}) Parsing Header `{}`", i, line);
+                    info!("({:?}) Parsing Header `{}`", i, line);
                     start_new = parse_header(line).unwrap().2;
                     at_source_line = 0;
                     continue;
                 }
                 if (line.starts_with("@@") && building_hunk) || line.starts_with("Recent commits") {
                     if line.starts_with("@@") {
-                        debug!("B: ({:?}) Setting Header: `{}`", i, line);
+                        info!("B: ({:?}) Setting Header: `{}`", i, line);
                         start_new = parse_header(line).unwrap().2;
                         at_source_line = 0;
                         continue;
@@ -366,19 +370,19 @@ impl CodeReviewDiff {
                     }
                 }
 
-                if building_hunk && line.starts_with("Reviewed by") {
-                    debug!("D: ({:?}) Review Start : {}", i, line);
+                if building_hunk && (line.starts_with("Reviewed by") || line.starts_with("Comment by")) {
+                    info!("D: ({:?}) Review Start : {}", i + 1, line);
                     in_review = true;
                     continue;
                 }
                 if in_review && line.starts_with("-------") {
-                    debug!("D: ({:?}) Review End: {}", i, line);
+                    info!("D: ({:?}) Review End: {}", i + 1, line);
                     in_review = false;
                     continue;
                 }
 
                 if in_review {
-                    debug!("D: ({:?}) Review Comment: {}", i, line);
+                    info!("D: ({:?}) Review Line: {}", i + 1, line);
                     continue;
                 }
 
@@ -396,8 +400,8 @@ impl CodeReviewDiff {
                         (current_filename.to_string(), diff_line.clone()),
                     );
 
-                    debug!(
-                        "C: ({:?})Adding line @ {:?} `{}`",
+                    info!(
+                        "C: ({:?}) Adding line @ {:?} `{}`",
                         i + 1,
                         diff_line.source_line_number.0,
                         line

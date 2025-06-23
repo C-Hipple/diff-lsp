@@ -122,7 +122,7 @@ impl ClientForBackendServer {
             .send_value_request(ser_params, method.clone(), true)
             .unwrap();
         let as_value: Value = serde_json::from_str(&raw_resp).unwrap();
-        info!("Request result for method: {:?}, {:?}", method, as_value);
+        // info!("Request result for method: {:?}, {:?}", method, as_value);
         if let Some(result) = as_value.get("result") {
             Ok(result.clone())
         } else {
