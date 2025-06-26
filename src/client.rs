@@ -228,7 +228,7 @@ impl ClientForBackendServer {
                     serde_json::from_value(unwrapped_result);
                 match hover_res {
                     Ok(parsed_res) => {
-                        info!("Okay on hover return!");
+                        info!("Okay on hover return! {:?}", parsed_res.contents);
                         return Ok(Some(parsed_res));
                     }
 

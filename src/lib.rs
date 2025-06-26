@@ -329,6 +329,7 @@ impl CodeReviewDiff {
         let mut start_new: u16 = 0; // TODO new variable name
         let mut at_source_line: u16 = 0;
         let mut in_review = false;
+        let mut line_num = 0;
 
         for (i, line) in source.lines().enumerate() {
             if !found_headers {
@@ -346,6 +347,7 @@ impl CodeReviewDiff {
                 }
             } else {
                 // found headers, moving onto hunks
+                line_num =  i + 1;
                 if line.starts_with("modified") {
                     current_filename = line.split_whitespace().nth(1).unwrap();
                     info!("Current filename when parsing: {:?}", current_filename);
@@ -353,14 +355,14 @@ impl CodeReviewDiff {
                 }
                 if line.starts_with("@@") && !building_hunk {
                     building_hunk = true;
-                    info!("({:?}) Parsing Header `{}`", i, line);
+                    info!("({:?}) Parsing Header `{}`", line_num, line);
                     start_new = parse_header(line).unwrap().2;
                     at_source_line = 0;
                     continue;
                 }
                 if (line.starts_with("@@") && building_hunk) || line.starts_with("Recent commits") {
                     if line.starts_with("@@") {
-                        info!("B: ({:?}) Setting Header: `{}`", i, line);
+                        info!("B: ({:?}) Setting Header: `{}`", line_num, line);
                         start_new = parse_header(line).unwrap().2;
                         at_source_line = 0;
                         continue;
@@ -371,18 +373,18 @@ impl CodeReviewDiff {
                 }
 
                 if building_hunk && (line.starts_with("Reviewed by") || line.starts_with("Comment by")) {
-                    info!("D: ({:?}) Review Start : {}", i + 1, line);
+                    info!("D: ({:?}) Review Start : {}",  line_num, line);
                     in_review = true;
                     continue;
                 }
                 if in_review && line.starts_with("-------") {
-                    info!("D: ({:?}) Review End: {}", i + 1, line);
+                    info!("D: ({:?}) Review End: {}", line_num, line);
                     in_review = false;
                     continue;
                 }
 
                 if in_review {
-                    info!("D: ({:?}) Review Line: {}", i + 1, line);
+                    info!("D: ({:?}) Review Line: {}",  line_num, line);
                     continue;
                 }
 
@@ -394,15 +396,15 @@ impl CodeReviewDiff {
                         source_line_number: SourceLineNumber(start_new + at_source_line),
                     };
 
-                    // the i + 1 is because i is 0 index, but file lines are 1 index.
+                    // the  line_num is because line_num is 0 index, but file lines are 1 index.
                     diff.lines_map.insert(
-                        InputLineNumber::new((i + 1).try_into().unwrap()),
+                        InputLineNumber::new(( line_num).try_into().unwrap()),
                         (current_filename.to_string(), diff_line.clone()),
                     );
 
                     info!(
                         "C: ({:?}) Adding line @ {:?} `{}`",
-                        i + 1,
+                         line_num,
                         diff_line.source_line_number.0,
                         line
                     );
