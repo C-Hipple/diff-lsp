@@ -3,6 +3,8 @@ use log::info;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 
+use tower_lsp::lsp_types::request::{GotoTypeDefinitionParams, GotoTypeDefinitionResponse};
+
 use std::{
     fs::canonicalize,
     //thread::{spawn},

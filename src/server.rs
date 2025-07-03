@@ -13,6 +13,7 @@ use serde_json::Value;
 use tower_lsp::jsonrpc::{Error as LspError, ErrorCode, Result as LspResult};
 use tower_lsp::lsp_types::notification::Notification;
 use tower_lsp::lsp_types::*;
+use tower_lsp::lsp_types::request::{ GotoTypeDefinitionParams, GotoTypeDefinitionResponse};
 use tower_lsp::{Client, LanguageServer};
 
 use anyhow::{anyhow, Result};
