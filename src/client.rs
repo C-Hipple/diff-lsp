@@ -263,6 +263,30 @@ impl ClientForBackendServer {
         }
     }
 
+    pub fn goto_type_definition(
+        &mut self,
+        params: &GotoTypeDefinitionParams,
+    ) -> Result<Option<GotoTypeDefinitionResponse>> {
+        info!("Doing goto type definition with the params: {:?}", params);
+
+        let res = self.request("textDocument/typeDefinition".to_string(), params);
+        match res {
+            Ok(unwrapped_result) => {
+                let definition_res: Result<GotoTypeDefinitionResponse, serde_json::Error> =
+                    serde_json::from_value(unwrapped_result);
+                match definition_res {
+                    Ok(parsed_res) => {
+                        info!("Okay on type definition return!");
+                        return Ok(Some(parsed_res));
+                    }
+
+                    Err(_) => return Ok(None),
+                }
+            }
+            Err(_) => return Ok(None),
+        }
+    }
+
     pub fn references(&mut self, params: &ReferenceParams) -> Result<Option<Vec<Location>>> {
         info!("Doing references with the params: {:?}", params);
 

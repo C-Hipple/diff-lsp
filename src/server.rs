@@ -200,6 +200,7 @@ impl LanguageServer for DiffLsp {
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
+                type_definition_provider: Some(TypeDefinitionProviderCapability::Simple(true)),
                 ..ServerCapabilities::default()
             },
             ..Default::default()
@@ -441,6 +442,48 @@ impl LanguageServer for DiffLsp {
         }
         let goto_def_res = backend.goto_definition(&mapped_params);
         match goto_def_res {
+            Ok(res) => Ok(res),
+            Err(_) => Err(LspError::new(ErrorCode::ServerError(1))), // Translating LspError type
+        }
+    }
+
+    async fn goto_type_definition(
+        &self,
+        params: GotoTypeDefinitionParams,
+    ) -> LspResult<Option<GotoTypeDefinitionResponse>> {
+        let source_map = self
+            .get_source_map(params.text_document_position_params.clone())
+            .await
+            .ok_or(LspError::new(ErrorCode::ServerError(1)))?;
+
+        let mut mapped_params = params.clone();
+        let backend_mutex_res = self.get_backend(&source_map);
+        let backend_mutex = match backend_mutex_res {
+            Some(bm) => bm,
+            None => return Err(LspError::new(ErrorCode::ServerError(1))),
+        };
+
+        let mut backend = backend_mutex.lock().await;
+
+        let uri = uri_from_relative_filename(self.root.clone(), &source_map.file_name);
+
+        mapped_params
+            .text_document_position_params
+            .text_document
+            .uri = uri;
+        mapped_params.text_document_position_params.position.line = source_map.source_line.0.into();
+
+        if source_map.source_line_type != LineType::Unmodified {
+            // this is a problem for 1 letter variables since emacs won't send the hover request
+            // for whitespace, even if it would get mapped to the correct position
+            // Account for the + or - at the start of the line
+            mapped_params
+                .text_document_position_params
+                .position
+                .character -= 1;
+        }
+        let goto_type_def_res = backend.goto_type_definition(&mapped_params);
+        match goto_type_def_res {
             Ok(res) => Ok(res),
             Err(_) => Err(LspError::new(ErrorCode::ServerError(1))), // Translating LspError type
         }
