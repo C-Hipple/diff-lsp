@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use strum::IntoEnumIterator;
 use std::fs::read_to_string;
+use strum::IntoEnumIterator;
 
 use log::info;
 use std::collections::HashMap;
@@ -12,8 +12,8 @@ use itertools::Itertools;
 use serde_json::Value;
 use tower_lsp::jsonrpc::{Error as LspError, ErrorCode, Result as LspResult};
 use tower_lsp::lsp_types::notification::Notification;
+use tower_lsp::lsp_types::request::{GotoTypeDefinitionParams, GotoTypeDefinitionResponse};
 use tower_lsp::lsp_types::*;
-use tower_lsp::lsp_types::request::{ GotoTypeDefinitionParams, GotoTypeDefinitionResponse};
 use tower_lsp::{Client, LanguageServer};
 
 use anyhow::{anyhow, Result};
@@ -63,8 +63,7 @@ pub fn create_backends_map(
             backends.insert(
                 supported_lang,
                 Arc::new(Mutex::new(client::ClientForBackendServer::new(
-                    command,
-                    dir,
+                    command, dir,
                 ))),
             );
         }

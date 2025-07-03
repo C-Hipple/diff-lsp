@@ -35,7 +35,6 @@ fn start_server(command: String, dir: &str) -> Result<Child> {
     //process.current_dir();
     let child = process
         // TODO actually set teh current dir; will be easy once we start the servers when our server gets a didOpen
-        // .current_dir(canonicalize("/Users/chrishipple/diff-lsp").unwrap())
         .current_dir(canonicalize(dir).unwrap())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
