@@ -33,7 +33,6 @@ impl SupportedFileType {
             .map(|(_name, extension)| extension.to_string())
             .and_then(|extension| SupportedFileType::from_extension(extension))
     }
-
 }
 
 pub fn get_lsp_for_file_type(file_type: SupportedFileType) -> Option<String> {
