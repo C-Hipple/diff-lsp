@@ -3,6 +3,8 @@ use log::info;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 
+use tower_lsp::lsp_types::request::{GotoTypeDefinitionParams, GotoTypeDefinitionResponse};
+
 use std::{
     fs::canonicalize,
     //thread::{spawn},
@@ -33,7 +35,6 @@ fn start_server(command: String, dir: &str) -> Result<Child> {
     //process.current_dir();
     let child = process
         // TODO actually set teh current dir; will be easy once we start the servers when our server gets a didOpen
-        // .current_dir(canonicalize("/Users/chrishipple/diff-lsp").unwrap())
         .current_dir(canonicalize(dir).unwrap())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -253,6 +254,30 @@ impl ClientForBackendServer {
                 match definition_res {
                     Ok(parsed_res) => {
                         info!("Okay on definition return!");
+                        return Ok(Some(parsed_res));
+                    }
+
+                    Err(_) => return Ok(None),
+                }
+            }
+            Err(_) => return Ok(None),
+        }
+    }
+
+    pub fn goto_type_definition(
+        &mut self,
+        params: &GotoTypeDefinitionParams,
+    ) -> Result<Option<GotoTypeDefinitionResponse>> {
+        info!("Doing goto type definition with the params: {:?}", params);
+
+        let res = self.request("textDocument/typeDefinition".to_string(), params);
+        match res {
+            Ok(unwrapped_result) => {
+                let definition_res: Result<GotoTypeDefinitionResponse, serde_json::Error> =
+                    serde_json::from_value(unwrapped_result);
+                match definition_res {
+                    Ok(parsed_res) => {
+                        info!("Okay on type definition return!");
                         return Ok(Some(parsed_res));
                     }
 
