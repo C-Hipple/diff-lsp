@@ -123,7 +123,7 @@ impl ClientForBackendServer {
             .send_value_request(ser_params, method.clone(), true)
             .unwrap();
         let as_value: Value = serde_json::from_str(&raw_resp).unwrap();
-        info!("Request result for method: {:?}, {:?}", method, as_value);
+        // info!("Request result for method: {:?}, {:?}", method, as_value);
         if let Some(result) = as_value.get("result") {
             Ok(result.clone())
         } else {
@@ -229,7 +229,7 @@ impl ClientForBackendServer {
                     serde_json::from_value(unwrapped_result);
                 match hover_res {
                     Ok(parsed_res) => {
-                        info!("Okay on hover return!");
+                        info!("Okay on hover return! {:?}", parsed_res.contents);
                         return Ok(Some(parsed_res));
                     }
 
