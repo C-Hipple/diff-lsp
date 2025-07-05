@@ -328,7 +328,7 @@ impl CodeReviewDiff {
         let mut start_new: u16 = 0; // TODO new variable name
         let mut at_source_line: u16 = 0;
         let mut in_review = false;
-        let mut line_num = 0;
+        let mut line_num;
 
         for (i, line) in source.lines().enumerate() {
             if !found_headers {
