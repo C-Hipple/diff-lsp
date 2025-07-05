@@ -1,8 +1,8 @@
+use chrono::{DateTime, Utc};
 use log::info;
 use regex::Regex;
 use std::collections::HashMap;
 use url::Url;
-use chrono::{DateTime, Utc};
 
 use std::str::FromStr;
 use strum_macros::{EnumIter, EnumString};
@@ -34,7 +34,6 @@ impl SupportedFileType {
             .map(|(_name, extension)| extension.to_string())
             .and_then(|extension| SupportedFileType::from_extension(extension))
     }
-
 }
 
 pub fn get_lsp_for_file_type(file_type: SupportedFileType) -> Option<String> {
@@ -347,7 +346,7 @@ impl CodeReviewDiff {
                 }
             } else {
                 // found headers, moving onto hunks
-                line_num =  i + 1;
+                line_num = i + 1;
                 if line.starts_with("modified") {
                     current_filename = line.split_whitespace().nth(1).unwrap();
                     info!("Current filename when parsing: {:?}", current_filename);
@@ -372,8 +371,10 @@ impl CodeReviewDiff {
                     }
                 }
 
-                if building_hunk && (line.starts_with("Reviewed by") || line.starts_with("Comment by")) {
-                    info!("D: ({:?}) Review Start : {}",  line_num, line);
+                if building_hunk
+                    && (line.starts_with("Reviewed by") || line.starts_with("Comment by"))
+                {
+                    info!("D: ({:?}) Review Start : {}", line_num, line);
                     in_review = true;
                     continue;
                 }
@@ -384,7 +385,7 @@ impl CodeReviewDiff {
                 }
 
                 if in_review {
-                    info!("D: ({:?}) Review Line: {}",  line_num, line);
+                    info!("D: ({:?}) Review Line: {}", line_num, line);
                     continue;
                 }
 
@@ -398,15 +399,13 @@ impl CodeReviewDiff {
 
                     // the  line_num is because line_num is 0 index, but file lines are 1 index.
                     diff.lines_map.insert(
-                        InputLineNumber::new(( line_num).try_into().unwrap()),
+                        InputLineNumber::new((line_num).try_into().unwrap()),
                         (current_filename.to_string(), diff_line.clone()),
                     );
 
                     info!(
                         "C: ({:?}) Adding line @ {:?} `{}`",
-                         line_num,
-                        diff_line.source_line_number.0,
-                        line
+                        line_num, diff_line.source_line_number.0, line
                     );
 
                     if matches!(line_type, LineType::Added | LineType::Unmodified) {
