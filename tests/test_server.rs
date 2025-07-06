@@ -5,7 +5,8 @@ mod tests {
     use diff_lsp::server::read_initialization_params_from_tempfile;
     use diff_lsp::server::DiffLsp;
     use diff_lsp::SupportedFileType;
-    use diff_lsp::{DiffHeader, MagitDiff, Parsable};
+    use diff_lsp::parsers::magit::MagitDiff;
+    use diff_lsp::parsers::utils::{DiffHeader, Parsable};
     use expanduser::expanduser;
     use log::info;
     use std::fs;
