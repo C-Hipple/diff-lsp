@@ -163,6 +163,7 @@ impl DiffLsp {
             // info!("Found the diff at URI: {:?}", uri.clone());
             info!("Used diff line count {:?}", diff.lines_map.len());
             info!("Used diff line parsed at {:?}", diff.parsed_at);
+            info!("Used source with total lines: {:?}", diff.total_lines);
             return diff.map_diff_line_to_src(line_num);
         }
         info!("Failed to find diff at URI: {:?}", uri.clone());
@@ -184,11 +185,6 @@ impl DiffLsp {
             info!("Diff new len: {:?}", diff.lines_map.len());
 
             diff_map.insert(uri.clone(), diff.clone()); // Use the *same* lock to insert
-            // self.diff_map = diff_map;
-            // if let Some(diff_after) = diff_after {
-                                                        //     info!("Diff after len: {:?}", diff_after.lines_map.len());
-                                                        // }
-
             Some(diff)
         } else {
             None
@@ -299,7 +295,10 @@ impl LanguageServer for DiffLsp {
             }
         };
 
-        info!("source map: {:?} - {:?}", source_map.source_line, source_map.source_line_text);
+        info!(
+            "source map: {:?} - {:?}",
+            source_map.source_line, source_map.source_line_text
+        );
         let backend_mutex_res = self.get_backend(&source_map);
         let backend_mutex = match backend_mutex_res {
             Some(bm) => bm,
@@ -358,10 +357,10 @@ impl LanguageServer for DiffLsp {
                         uri_from_relative_filename(self.root.clone(), &filename);
                     these_params.text_document.text = text;
                     info!(
-                        "Calling Did open to {:?} for file {:?}; with text: {:?}",
+                        "Calling Did open to {:?} for file {:?};",
                         backend.lsp_command,
                         these_params.text_document.uri.as_str(),
-                        these_params.text_document.text
+                        // these_params.text_document.text
                     );
                     backend.did_open(&these_params);
                 }
