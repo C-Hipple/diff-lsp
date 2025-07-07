@@ -14,6 +14,7 @@ pub enum SupportedFileType {
     Rust,
     Go,
     Python,
+    TypeScript,
 }
 
 impl SupportedFileType {
@@ -22,6 +23,7 @@ impl SupportedFileType {
             "rs" => Some(SupportedFileType::Rust),
             "go" => Some(SupportedFileType::Go),
             "py" => Some(SupportedFileType::Python),
+            "ts" | "tsx" => Some(SupportedFileType::TypeScript),
             _ => None,
         }
     }
@@ -34,13 +36,17 @@ impl SupportedFileType {
     }
 }
 
-pub fn get_lsp_for_file_type(file_type: SupportedFileType) -> Option<String> {
+pub fn get_lsp_for_file_type(file_type: SupportedFileType) -> (String, Option<String>) {
     // TBH no idea why this is an Option type.  Maybe I should check that these
     // actually exist on the machine running lsp?
     match file_type {
-        SupportedFileType::Rust => Some("rust-analyzer".to_string()),
-        SupportedFileType::Go => Some("gopls".to_string()),
-        SupportedFileType::Python => Some("pylsp".to_string()),
+        SupportedFileType::Rust => ("rust-analyzer".to_string(), None),
+        SupportedFileType::Go => ("gopls".to_string(), None),
+        SupportedFileType::Python => ("pylsp".to_string(), None),
+        SupportedFileType::TypeScript => (
+            "typescript-language-server".to_string(),
+            Some("--stdio".to_string()),
+        ),
     }
 }
 

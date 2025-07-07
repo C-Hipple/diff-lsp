@@ -58,12 +58,12 @@ pub fn create_backends_map(
 
     for supported_lang in SupportedFileType::iter() {
         if active_langs.contains(&supported_lang) {
-            let command = get_lsp_for_file_type(supported_lang).unwrap();
+            let (command, args) = get_lsp_for_file_type(supported_lang);
             info!("Starting client for server: {:?}", command);
             backends.insert(
                 supported_lang,
                 Arc::new(Mutex::new(client::ClientForBackendServer::new(
-                    command, dir,
+                    command, args, dir,
                 ))),
             );
         }
