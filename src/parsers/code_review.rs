@@ -64,7 +64,7 @@ impl CodeReviewDiff {
             } else {
                 // found headers, moving onto hunks
                 line_num = i + 1;
-                if line.starts_with("modified") {
+                if is_file_header(line) {
                     current_filename = line.split_whitespace().nth(1).unwrap();
                     info!("Current filename when parsing: {:?}", current_filename);
                     diff.filenames.push(current_filename.to_string());
@@ -106,7 +106,7 @@ impl CodeReviewDiff {
                     continue;
                 }
 
-                if building_hunk && !line.starts_with("modified ") {
+                if building_hunk && !is_file_header(line) {
                     let line_type = LineType::from_line(line);
                     let diff_line = DiffLine {
                         line_type: line_type,

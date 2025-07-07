@@ -141,3 +141,9 @@ impl Parsable for ParsedDiff {
         }
     }
 }
+
+pub fn is_file_header(line: &str) -> bool {
+    return line.starts_with("modified  ")
+        || line.starts_with("new file  ")
+        || line.starts_with("deleted  ");
+}
