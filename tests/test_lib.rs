@@ -24,10 +24,10 @@ impl log::Log for SimpleLogger {
 #[cfg(test)]
 mod tests {
     use super::SimpleLogger;
-    use diff_lsp::{uri_from_relative_filename, SupportedFileType};
     use diff_lsp::parsers::code_review::CodeReviewDiff;
     use diff_lsp::parsers::magit::MagitDiff;
     use diff_lsp::parsers::utils::{DiffHeader, LineType, Parsable, ParsedDiff, SourceLineNumber};
+    use diff_lsp::{uri_from_relative_filename, SupportedFileType};
     use std::fs;
 
     #[allow(unused)]
