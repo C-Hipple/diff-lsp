@@ -17,7 +17,10 @@ extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.autosummary',
     'sphinx.ext.intersphinx',
+    'sphinx_rtd_dark_mode',
 ]
+
+default_dark_mode = True
 
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3/', None),
