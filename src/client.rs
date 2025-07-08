@@ -30,11 +30,12 @@ pub struct ClientForBackendServer {
     request_id: i32,
 }
 
-fn start_server(command: String, dir: &str) -> Result<Child> {
+fn start_server(command: String, args: Option<String>, dir: &str) -> Result<Child> {
     let mut process = Command::new(&command);
-    //process.current_dir();
+    if let Some(args_val) = args {
+        process.args(args_val.split_whitespace());
+    }
     let child = process
-        // TODO actually set teh current dir; will be easy once we start the servers when our server gets a didOpen
         .current_dir(canonicalize(dir).unwrap())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -48,10 +49,10 @@ fn start_server(command: String, dir: &str) -> Result<Child> {
 }
 
 impl ClientForBackendServer {
-    pub fn new(command: String, directory: &str) -> Self {
+    pub fn new(command: String, args: Option<String>, directory: &str) -> Self {
         ClientForBackendServer {
             lsp_command: command.clone(),
-            process: start_server(command.clone(), directory).unwrap(),
+            process: start_server(command.clone(), args, directory).unwrap(),
             path: Some(canonicalize(directory).unwrap()),
             request_id: 1,
         }

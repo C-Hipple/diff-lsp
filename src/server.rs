@@ -58,12 +58,12 @@ pub fn create_backends_map(
 
     for supported_lang in SupportedFileType::iter() {
         if active_langs.contains(&supported_lang) {
-            let command = get_lsp_for_file_type(supported_lang).unwrap();
+            let (command, args) = get_lsp_for_file_type(supported_lang);
             info!("Starting client for server: {:?}", command);
             backends.insert(
                 supported_lang,
                 Arc::new(Mutex::new(client::ClientForBackendServer::new(
-                    command, dir,
+                    command, args, dir,
                 ))),
             );
         }
@@ -349,12 +349,19 @@ impl LanguageServer for DiffLsp {
                     let mut these_params = params.clone();
                     // Here we need to break the LSP contract and use the originator's didOpen URI to read the contents of the file.
 
-                    info!("Opening filename: {:?}", filename.clone());
-                    let full_path = self.root.clone() + "/" + &filename;
-                    let text = fs::read_to_string(full_path).unwrap();
+                    // 2025-07-07 22:03:47 - INFO - Calling Did open to "rust-analyzer" for file "file:///home/chris/diff-lsp/src/server.rs";
 
                     these_params.text_document.uri =
                         uri_from_relative_filename(self.root.clone(), &filename);
+
+                    // lol back to a regular filename
+                    let full_path = these_params
+                        .text_document
+                        .uri
+                        .as_str()
+                        .replace("file://", "");
+                    info!("Opening filename: {:?}", full_path);
+                    let text = fs::read_to_string(full_path).unwrap();
                     these_params.text_document.text = text;
                     info!(
                         "Calling Did open to {:?} for file {:?};",
