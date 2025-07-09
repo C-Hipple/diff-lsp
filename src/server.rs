@@ -170,7 +170,7 @@ impl DiffLsp {
         None
     }
 
-    async fn refresh_file(&self, uri: Url) -> Option<ParsedDiff> {
+    async fn refresh_file(&self, uri: &Url) -> Option<ParsedDiff> {
         let real_path = uri.path();
         info!("Calling refresh_file for the real path: {:?}", real_path);
 
@@ -216,11 +216,15 @@ impl LanguageServer for DiffLsp {
                 version: Some("0.1.0".to_string()),
             }),
             capabilities: ServerCapabilities {
-                execute_command_provider: None,
+                execute_command_provider: Some(ExecuteCommandOptions {
+                    commands: vec!["custom.notification".to_string()],
+                    ..Default::default()
+                }),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
                 type_definition_provider: Some(TypeDefinitionProviderCapability::Simple(true)),
+                // document_symbol_provider: Some(OneOf::Left(true)),
                 ..ServerCapabilities::default()
             },
             ..Default::default()
@@ -255,6 +259,7 @@ impl LanguageServer for DiffLsp {
     }
 
     async fn execute_command(&self, params: ExecuteCommandParams) -> LspResult<Option<Value>> {
+        info!("Doing command with params: {:?}", params);
         if params.command == "custom.notification" {
             self.client
                 .send_notification::<CustomNotification>(CustomNotificationParams::new(
@@ -267,6 +272,18 @@ impl LanguageServer for DiffLsp {
                     format!("Command execute with params: {params:?}"),
                 )
                 .await;
+            Ok(None)
+        } else if params.command == "refresh" {
+            let keys = {
+                // unlocks when the reference goes out of scope
+                let diff_map = self.diff_map.lock().await;
+                diff_map.keys().cloned().collect::<Vec<_>>()
+            };
+            for key in keys {
+                info!("Starting refresh of {:?}", key);
+                self.refresh_file(&key).await;
+                info!("Finished refresh of {:?}", key);
+            }
             Ok(None)
         } else {
             Err(LspError::invalid_request())
@@ -335,7 +352,7 @@ impl LanguageServer for DiffLsp {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         // info!("Opened document: {:?}", params);  // uncomment to show that we get diff-test as our did open, but we send the real file to the backend
-        if let Some(diff) = self.refresh_file(params.text_document.uri.clone()).await {
+        if let Some(diff) = self.refresh_file(&params.text_document.uri).await {
             let filtered_files: Vec<String> = diff.filenames.clone().into_iter().unique().collect();
             for filename in filtered_files {
                 let filetype = SupportedFileType::from_filename(filename.clone());
@@ -382,7 +399,7 @@ impl LanguageServer for DiffLsp {
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         info!("Calling did_close {:?}", params);
-        self.refresh_file(params.text_document.uri).await;
+        self.refresh_file(&params.text_document.uri).await;
     }
 
     async fn references(&self, _params: ReferenceParams) -> LspResult<Option<Vec<Location>>> {
