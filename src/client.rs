@@ -49,13 +49,15 @@ fn start_server(command: String, args: Option<String>, dir: &str) -> Result<Chil
 }
 
 impl ClientForBackendServer {
-    pub fn new(command: String, args: Option<String>, directory: &str) -> Self {
-        ClientForBackendServer {
-            lsp_command: command.clone(),
-            process: start_server(command.clone(), args, directory).unwrap(),
-            path: Some(canonicalize(directory).unwrap()),
-            request_id: 1,
-        }
+    pub fn new(command: &String, args: Option<String>, directory: &str) -> Option<Self> {
+        if let Ok(process) = start_server(command, args, directory) {
+            Some(ClientForBackendServer {
+                lsp_command: command.clone(),
+                process: process,
+                path: Some(canonicalize(directory).unwrap()),
+                request_id: 1,
+            })
+        } else {None}
     }
 
     fn get_request_id(&mut self) -> i32 {

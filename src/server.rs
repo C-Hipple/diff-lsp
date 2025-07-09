@@ -60,12 +60,11 @@ pub fn create_backends_map(
         if active_langs.contains(&supported_lang) {
             let (command, args) = get_lsp_for_file_type(supported_lang);
             info!("Starting client for server: {:?}", command);
-            backends.insert(
-                supported_lang,
-                Arc::new(Mutex::new(client::ClientForBackendServer::new(
-                    command, args, dir,
-                ))),
-            );
+            if let Some(client) = client::ClientForBackendServer::new(command, args, dir) {
+                backends.insert(supported_lang, Arc::new(Mutex::new(client)));
+            } else {
+                info!("Warning! no client found installed for {:?}", command)
+            }
         }
     }
     backends
