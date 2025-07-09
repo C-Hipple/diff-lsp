@@ -216,11 +216,15 @@ impl LanguageServer for DiffLsp {
                 version: Some("0.1.0".to_string()),
             }),
             capabilities: ServerCapabilities {
-                execute_command_provider: None,
+                execute_command_provider: Some(ExecuteCommandOptions {
+                    commands: vec!["custom.notification".to_string()],
+                    ..Default::default()
+                }),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
                 type_definition_provider: Some(TypeDefinitionProviderCapability::Simple(true)),
+                // document_symbol_provider: Some(OneOf::Left(true)),
                 ..ServerCapabilities::default()
             },
             ..Default::default()
@@ -255,6 +259,7 @@ impl LanguageServer for DiffLsp {
     }
 
     async fn execute_command(&self, params: ExecuteCommandParams) -> LspResult<Option<Value>> {
+        info!("Doing command with params: {:?}", params);
         if params.command == "custom.notification" {
             self.client
                 .send_notification::<CustomNotification>(CustomNotificationParams::new(
@@ -267,6 +272,9 @@ impl LanguageServer for DiffLsp {
                     format!("Command execute with params: {params:?}"),
                 )
                 .await;
+            Ok(None)
+        } else if params.command == "refresh" {
+            // self.refresh_file();
             Ok(None)
         } else {
             Err(LspError::invalid_request())
