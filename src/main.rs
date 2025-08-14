@@ -4,6 +4,8 @@ use std::io::prelude::*;
 use std::path::PathBuf;
 
 use chrono::Local;
+use diff_lsp::parsers::code_review::CodeReviewDiff;
+use diff_lsp::parsers::utils::Parsable;
 use expanduser::expanduser;
 use log::{info, Level, LevelFilter, Log, Metadata, Record, SetLoggerError};
 use tower_lsp::{LspService, Server};
@@ -58,18 +60,52 @@ impl Log for FileLogger {
     }
 }
 
-static LOGGER: FileLogger = FileLogger;
+struct StdOutLogger;
 
-pub fn initialize_logger() -> Result<(), SetLoggerError> {
-    log::set_logger(&LOGGER).map(|()| log::set_max_level(LevelFilter::Info))
+impl Log for StdOutLogger {
+    fn enabled(&self, metadata: &Metadata) -> bool {
+        metadata.level() <= Level::Debug
+    }
+
+    fn log(&self, record: &Record) {
+        if self.enabled(record.metadata()) {
+            let now = Local::now();
+            let formatted_time = now.format("%Y-%m-%d %H:%M:%S");
+            eprintln!(
+                "{} - {} - {}",
+                formatted_time,
+                record.level(),
+                record.args()
+            );
+        }
+    }
+
+    fn flush(&self) {}
+}
+
+
+pub fn initialize_logger(use_io_logger: bool) -> Result<(), SetLoggerError> {
+    let logger: Box<dyn Log + Send + Sync> = if use_io_logger {
+        Box::new(StdOutLogger)
+    } else {
+        Box::new(FileLogger)
+    };
+    log::set_logger(Box::leak(logger)).map(|()| log::set_max_level(LevelFilter::Info))
 }
 
 #[tokio::main]
 async fn main() {
-    let _ = initialize_logger().unwrap();
+    let use_io_logger = std::env::args().any(|arg| arg == "--io");
+    let _ = initialize_logger(use_io_logger).unwrap();
     let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
     let tempfile_path = expanduser("~/.diff-lsp-tempfile").unwrap();
     let (cwd, langs) = read_initialization_params_from_tempfile(&tempfile_path).unwrap();
+    if use_io_logger {
+        let diff = CodeReviewDiff::parse("~/.diff-lsp/js-deleted-file-review.diff-test");
+        println!("{:?}", diff);
+        std::process::exit(0);
+    }
+
     let backends = create_backends_map(langs, &cwd);
     let (diff_lsp_service, socket) =
         LspService::new(|client| DiffLsp::new(client, backends, cwd.to_string()));

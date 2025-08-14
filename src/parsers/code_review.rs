@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use chrono::Utc;
-use log::info;
+// use log::println;
 use regex::Regex;
 
 use crate::parsers::utils::*;
@@ -40,7 +40,7 @@ impl CodeReviewDiff {
         let mut diff = CodeReviewDiff::default();
 
         let mut found_headers = false;
-        let mut current_filename = "";
+        let current_filename = "";
         let mut building_hunk = false;
         let mut start_new: u16 = 0; // TODO new variable name
         let mut at_source_line: u16 = 0;
@@ -51,7 +51,7 @@ impl CodeReviewDiff {
             if !found_headers {
                 let re = Regex::new(r"(\w+):\s+(.+)").unwrap();
                 if let Some(caps) = re.captures(line) {
-                    info!("{}", line);
+                    println!("{}", line);
                     match DiffHeader::from_str(&caps[1]) {
                         Ok(header) => {
                             diff.headers.insert(header, caps[2].to_string());
@@ -71,14 +71,14 @@ impl CodeReviewDiff {
                 }
                 if line.starts_with("@@") && !building_hunk {
                     building_hunk = true;
-                    info!("({:?}) Parsing Header `{}`", line_num, line);
+                    println!("({:?}) Parsing Header `{}`", line_num, line);
                     start_new = parse_header(line).unwrap().2;
                     at_source_line = 0;
                     continue;
                 }
                 if (line.starts_with("@@") && building_hunk) || line.starts_with("Recent commits") {
                     if line.starts_with("@@") {
-                        info!("B: ({:?}) Setting Header: `{}`", line_num, line);
+                        println!("B: ({:?}) Setting Header: `{}`", line_num, line);
                         start_new = parse_header(line).unwrap().2;
                         at_source_line = 0;
                         continue;
@@ -91,18 +91,18 @@ impl CodeReviewDiff {
                 if building_hunk
                     && (line.starts_with("Reviewed by") || line.starts_with("Comment by"))
                 {
-                    info!("D: ({:?}) Review Start : {}", line_num, line);
+                    println!("D: ({:?}) Review Start : {}", line_num, line);
                     in_review = true;
                     continue;
                 }
                 if in_review && line.starts_with("-------") {
-                    info!("D: ({:?}) Review End: {}", line_num, line);
+                    println!("D: ({:?}) Review End: {}", line_num, line);
                     in_review = false;
                     continue;
                 }
 
                 if in_review {
-                    info!("D: ({:?}) Review Line: {}", line_num, line);
+                    println!("D: ({:?}) Review Line: {}", line_num, line);
                     continue;
                 }
 
@@ -120,7 +120,7 @@ impl CodeReviewDiff {
                         (current_filename.to_string(), diff_line.clone()),
                     );
 
-                    info!(
+                    println!(
                         "C: ({:?}) Adding line @ {:?} `{}`",
                         line_num, diff_line.source_line_number.0, line
                     );
