@@ -64,9 +64,8 @@ impl CodeReviewDiff {
             } else {
                 // found headers, moving onto hunks
                 line_num = i + 1;
-                if is_file_header(line) {
-                    current_filename = line.split_whitespace().nth(1).unwrap();
-                    info!("Current filename when parsing: {:?}", current_filename);
+                if let Some(current_filename) = file_header_to_filename(line) {
+                    println!("Current filename when parsing: {:?}", current_filename);
                     diff.filenames.push(current_filename.to_string());
                 }
                 if line.starts_with("@@") && !building_hunk {
@@ -106,7 +105,7 @@ impl CodeReviewDiff {
                     continue;
                 }
 
-                if building_hunk && !is_file_header(line) {
+                if building_hunk && file_header_to_filename(line).is_none() {
                     let line_type = LineType::from_line(line);
                     let diff_line = DiffLine {
                         line_type: line_type,

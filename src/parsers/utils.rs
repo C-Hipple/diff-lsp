@@ -142,8 +142,16 @@ impl Parsable for ParsedDiff {
     }
 }
 
-pub fn is_file_header(line: &str) -> bool {
-    return line.starts_with("modified  ")
-        || line.starts_with("new file  ")
-        || line.starts_with("deleted  ");
+pub fn file_header_to_filename(line: &str) -> Option<String> {
+    if line.starts_with("modified  ") {
+        line.split_whitespace().nth(1).map(|s| s.to_string())
+    } else if line.starts_with("deleted") {
+        line.split_whitespace().nth(1).map(|s| s.to_string())
+    } else if line.starts_with("renamed") {
+        line.split_whitespace().last().map(|s| s.to_string())
+    } else if line.starts_with("rename from") || line.starts_with("rename to") {
+        None
+    } else {
+        None
+    }
 }
