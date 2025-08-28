@@ -37,14 +37,13 @@ pub struct DiffLine {
 }
 
 pub fn parse_header(header: &str) -> Option<(u16, u16, u16, u16)> {
-    let re = Regex::new(r"@@ -(\d+),(\d+) \+(\d+),(\d+) @@").unwrap();
+    let re = Regex::new(r"@@ -(\d+)(,(\d+))? \+(\d+)(,(\d+))? @@").unwrap();
     if let Some(caps) = re.captures(header) {
-        return Some((
-            caps[1].parse::<u16>().unwrap(),
-            caps[2].parse::<u16>().unwrap(),
-            caps[3].parse::<u16>().unwrap(),
-            caps[4].parse::<u16>().unwrap(),
-        ));
+        let old_start = caps[1].parse::<u16>().unwrap();
+        let old_lines = caps.get(3).map_or("1", |m| m.as_str()).parse::<u16>().unwrap();
+        let new_start = caps[4].parse::<u16>().unwrap();
+        let new_lines = caps.get(6).map_or("1", |m| m.as_str()).parse::<u16>().unwrap();
+        return Some((old_start, old_lines, new_start, new_lines));
     }
     None
 }

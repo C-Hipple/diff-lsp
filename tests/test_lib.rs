@@ -280,4 +280,11 @@ mod tests {
         assert_eq!(mapped.source_line, SourceLineNumber(79));
         assert_eq!(mapped.source_line_text, "+\t}");
     }
+
+    #[test]
+    fn test_parse_header_new_file() {
+        let header = "@@ -0,0 +1 @@";
+        let parsed = diff_lsp::parsers::utils::parse_header(header);
+        assert_eq!(parsed, Some((0, 0, 1, 1)));
+    }
 }

@@ -65,7 +65,7 @@ impl CodeReviewDiff {
                 // found headers, moving onto hunks
                 line_num = i + 1;
                 if is_file_header(line) {
-                    current_filename = line.split_whitespace().nth(1).unwrap();
+                    current_filename = line.split_whitespace().last().unwrap();
                     info!("Current filename when parsing: {:?}", current_filename);
                     diff.filenames.push(current_filename.to_string());
                 }
