@@ -22,7 +22,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::client;
-use crate::utils::get_unique_elements;
+use crate::utils::{fetch_origin_nonblocking, get_unique_elements};
+
 use crate::SupportedFileType;
 use crate::*;
 
@@ -117,13 +118,13 @@ impl DiffLsp {
             backends,
             diff_map: Mutex::new((|| {
                 // TODO Actually set diff during textDocument/didOpen
-                let mut map: HashMap<Url, ParsedDiff> = HashMap::new();
-                let diff_path = expanduser("~/.diff-lsp-tempfile").unwrap();
+                let map: HashMap<Url, ParsedDiff> = HashMap::new();
+                // let diff_path = expanduser("~/.diff-lsp-tempfile").unwrap();
 
-                let contents = fs::read_to_string(diff_path.clone()).unwrap();
-                let diff = ParsedDiff::parse(&contents);
-                let str_diff_path = diff_path.to_str().unwrap();
-                map.insert(Url::from_file_path(str_diff_path).unwrap(), diff.unwrap());
+                // let contents = fs::read_to_string(diff_path.clone()).unwrap();
+                // let diff = ParsedDiff::parse(&contents);
+                // let str_diff_path = diff_path.to_str().unwrap();
+                // map.insert(Url::from_file_path(str_diff_path).unwrap(), diff.unwrap());
                 map
             })()),
             // Lazydiff_map,
@@ -284,6 +285,11 @@ impl LanguageServer for DiffLsp {
                 self.refresh_file(&key).await;
                 info!("Finished refresh of {:?}", key);
             }
+            fetch_origin_nonblocking(&self.root);
+            Ok(None)
+        } else if params.command == "fetch" {
+            let mut child = fetch_origin_nonblocking(&self.root);
+            let _ = child.wait().await;
             Ok(None)
         } else {
             Err(LspError::invalid_request())
@@ -344,6 +350,7 @@ impl LanguageServer for DiffLsp {
 
         // info!("Hover mapped params: {:?}", mapped_params);
         let hov_res = backend.hover(mapped_params);
+        info!("Hover res: {:?}", hov_res);
         match hov_res {
             Ok(res) => Ok(res),
             Err(_) => Err(LspError::new(ErrorCode::ServerError(1))), // Translating LspError type

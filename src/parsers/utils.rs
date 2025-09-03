@@ -37,6 +37,7 @@ pub struct DiffLine {
 }
 
 pub fn parse_header(header: &str) -> Option<(u16, u16, u16, u16)> {
+    // Complex regex to support when the code is added at the start of a file, and we don't have all 4 values
     let re = Regex::new(r"@@ -(\d+)(,(\d+))? \+(\d+)(,(\d+))? @@").unwrap();
     if let Some(caps) = re.captures(header) {
         let old_start = caps[1].parse::<u16>().unwrap();
