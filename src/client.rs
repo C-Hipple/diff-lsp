@@ -124,7 +124,7 @@ impl ClientForBackendServer {
             .send_value_request(ser_params, method.clone(), true)
             .unwrap();
         let as_value: Value = serde_json::from_str(&raw_resp).unwrap();
-        // info!("Request result for method: {:?}, {:?}", method, as_value);
+        info!("Request result for method: {:?}, {:?}", method, as_value);
         if let Some(result) = as_value.get("result") {
             Ok(result.clone())
         } else {
@@ -222,7 +222,7 @@ impl ClientForBackendServer {
     }
 
     pub fn hover(&mut self, params: HoverParams) -> Result<Option<Hover>> {
-        println!("Doing hover with teh params: {:?}", params);
+        info!("Doing hover with teh params: {:?}", params);
         let res = self.request("textDocument/hover".to_string(), params);
         match res {
             Ok(unwrapped_result) => {

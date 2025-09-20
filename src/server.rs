@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
-use expanduser::expanduser;
 use itertools::Itertools;
 use serde_json::Value;
 use tower_lsp::jsonrpc::{Error as LspError, ErrorCode, Result as LspResult};
@@ -57,6 +56,7 @@ pub fn create_backends_map(
     let mut backends: HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>> =
         HashMap::new();
 
+    info!("creating backend map for langs: {:?}", active_langs);
     for supported_lang in SupportedFileType::iter() {
         if active_langs.contains(&supported_lang) {
             let (command, args) = get_lsp_for_file_type(supported_lang);
@@ -325,7 +325,9 @@ impl LanguageServer for DiffLsp {
         let backend_mutex_res = self.get_backend(&source_map);
         let backend_mutex = match backend_mutex_res {
             Some(bm) => bm,
-            None => return Err(LspError::new(ErrorCode::ServerError(1))),
+            None => {
+                info!("No found backend mutex!");
+                return Err(LspError::new(ErrorCode::ServerError(1)))},
         };
         let mut backend = backend_mutex.lock().await;
         // TODO do all this mapping in an async func since there's a lot of cloning and whatnot and then futures::join! it with the backend_mutex
@@ -336,6 +338,7 @@ impl LanguageServer for DiffLsp {
             .text_document_position_params
             .text_document
             .uri = uri;
+
         mapped_params.text_document_position_params.position.line = source_map.source_line.0.into();
 
         if source_map.source_line_type != LineType::Unmodified {
@@ -394,6 +397,8 @@ impl LanguageServer for DiffLsp {
                         // these_params.text_document.text
                     );
                     backend.did_open(&these_params);
+                }
+                else {
                 }
             }
         }
