@@ -2,6 +2,7 @@ use std::fs::{remove_file, OpenOptions};
 
 use std::io::prelude::*;
 use std::path::PathBuf;
+use std::env;
 
 use chrono::Local;
 use expanduser::expanduser;
@@ -68,6 +69,13 @@ pub fn initialize_logger() -> Result<(), SetLoggerError> {
 #[tokio::main]
 async fn main() {
     let _ = initialize_logger().unwrap();
+    info!("starting printing args!");
+    for arg in env::args() {
+        info!("arg!{:?}", arg);
+
+    }
+
+    info!("done printing args!");
     let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
     let tempfile_path = expanduser("~/.diff-lsp-tempfile").unwrap();
     let (cwd, langs) = read_initialization_params_from_tempfile(&tempfile_path).unwrap();
