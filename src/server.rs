@@ -53,7 +53,7 @@ pub fn create_backends_map(
     active_langs: Vec<SupportedFileType>,
     dir: &str,
 ) -> HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>> {
-    let mut backends: HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>> =
+    let mut backends: HashMap<SupportedFileType, &mut ClientForBackendServer> =
         HashMap::new();
 
     info!("creating backend map for langs: {:?}", active_langs);
@@ -63,7 +63,7 @@ pub fn create_backends_map(
             info!("Starting client for server: {:?}", command);
             backends.insert(
                 supported_lang,
-                Arc::new(Mutex::new(client::ClientForBackendServer::new(
+                client::ClientForBackendServer::new(
                     command, args, dir,
                 ))),
             );
@@ -115,6 +115,7 @@ impl DiffLsp {
     ) -> Self {
         let server = DiffLsp {
             client,
+            Arc::new(Mutex::new()
             backends,
             diff_map: Mutex::new((|| {
                 // TODO Actually set diff during textDocument/didOpen
@@ -144,6 +145,7 @@ impl DiffLsp {
         &self,
         source_map: &SourceMap,
     ) -> Option<&Arc<Mutex<client::ClientForBackendServer>>> {
+        info!("Backends available: {:?}", self.backends);
         self.backends.get(&source_map.file_type)
     }
 
@@ -179,6 +181,7 @@ impl DiffLsp {
         if let Some(diff) = ParsedDiff::parse(&contents) {
             info!("Inserting diff! 2");
             let mut diff_map = self.diff_map.lock().await;
+            // self.backends.insert(k, v);
 
             if let Some(diff_before) = diff_map.get(&uri) {
                 info!("Diff before len: {:?}", diff_before.lines_map.len());
@@ -327,7 +330,8 @@ impl LanguageServer for DiffLsp {
             Some(bm) => bm,
             None => {
                 info!("No found backend mutex!");
-                return Err(LspError::new(ErrorCode::ServerError(1)))},
+                return Err(LspError::new(ErrorCode::ServerError(1)));
+            }
         };
         let mut backend = backend_mutex.lock().await;
         // TODO do all this mapping in an async func since there's a lot of cloning and whatnot and then futures::join! it with the backend_mutex
@@ -397,8 +401,7 @@ impl LanguageServer for DiffLsp {
                         // these_params.text_document.text
                     );
                     backend.did_open(&these_params);
-                }
-                else {
+                } else {
                 }
             }
         }
