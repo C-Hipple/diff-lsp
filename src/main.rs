@@ -9,7 +9,7 @@ use log::{info, Level, LevelFilter, Log, Metadata, Record, SetLoggerError};
 use tower_lsp::{LspService, Server};
 
 use diff_lsp::server::{create_backends_map, read_initialization_params_from_tempfile, DiffLsp};
-use diff_lsp::utils::fetch_origin_nonblocking;
+use diff_lsp::utils::{fetch_origin_nonblocking, get_most_recent_file};
 
 const LOG_FILE_PATH: &str = "~/.diff-lsp.log";
 
@@ -69,7 +69,9 @@ pub fn initialize_logger() -> Result<(), SetLoggerError> {
 async fn main() {
     let _ = initialize_logger().unwrap();
     let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
-    let tempfile_path = expanduser("~/.diff-lsp-tempfile").unwrap();
+
+    let tempfile_path = get_most_recent_file("/tmp", "diff_lsp_").unwrap().unwrap();
+    info!("Looking at tempfile: {:?}", tempfile_path);
     let (cwd, langs) = read_initialization_params_from_tempfile(&tempfile_path).unwrap();
     fetch_origin_nonblocking(&cwd);
     let backends = create_backends_map(langs, &cwd);
