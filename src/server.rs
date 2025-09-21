@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
-use expanduser::expanduser;
 use itertools::Itertools;
 use serde_json::Value;
 use tower_lsp::jsonrpc::{Error as LspError, ErrorCode, Result as LspResult};
