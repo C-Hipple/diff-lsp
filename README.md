@@ -25,3 +25,7 @@ See [diff-lsp.el](https://www.github.com/C-Hipple/diff-lsp.el) for configuring &
 
 
 diff-lsp.el sets up diff-lsp for both magit status and [code-review](https://www.github.com/C-Hipple/code-review) buffers.
+
+## Limitations
+
+Right now I have a limitation where you can't add more clients for backend servers in a single sesion with the LSP, and you have to restart it.  Normally this is not a problem and is trivial to do.  The reason is because of the types with the backends hashmap being not mutable I'd need to put the whole hashmap behind a mutex which gets me into a ton of rust typing headaches.
