@@ -52,8 +52,8 @@ impl Notification for CustomNotification {
 pub fn create_backends_map(
     active_langs: Vec<SupportedFileType>,
     dir: &str,
-) -> HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>> {
-    let mut backends: HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>> =
+) -> HashMap<SupportedFileType, &mut client::ClientForBackendServer> {
+    let mut backends: HashMap<SupportedFileType, &mut client::ClientForBackendServer> =
         HashMap::new();
 
     info!("creating backend map for langs: {:?}", active_langs);
@@ -63,9 +63,7 @@ pub fn create_backends_map(
             info!("Starting client for server: {:?}", command);
             backends.insert(
                 supported_lang,
-                Arc::new(Mutex::new(client::ClientForBackendServer::new(
-                    command, args, dir,
-                ))),
+                &mut client::ClientForBackendServer::new(command, args, dir),
             );
         }
     }
@@ -100,22 +98,22 @@ pub fn read_initialization_params_from_tempfile(
 }
 
 #[derive(Debug)]
-pub struct DiffLsp {
+pub struct DiffLsp<'a> {
     pub client: Client,
-    pub backends: HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>>,
+    pub backends: Mutex<HashMap<SupportedFileType, &'a mut client::ClientForBackendServer>>,
     pub diff_map: Mutex<HashMap<Url, ParsedDiff>>,
     pub root: String, // The project root, without a trailing slash.  ~/diff-lsp for example
 }
 
-impl DiffLsp {
+impl<'a> DiffLsp<'a> {
     pub fn new(
         client: Client,
-        backends: HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>>,
+        backends: HashMap<SupportedFileType, &'a mut client::ClientForBackendServer>,
         root: String,
     ) -> Self {
         let server = DiffLsp {
             client,
-            backends,
+            backends: Mutex::new(backends),
             diff_map: Mutex::new((|| {
                 // TODO Actually set diff during textDocument/didOpen
                 let map: HashMap<Url, ParsedDiff> = HashMap::new();
@@ -140,11 +138,13 @@ impl DiffLsp {
         server
     }
 
-    fn get_backend(
-        &self,
-        source_map: &SourceMap,
-    ) -> Option<&Arc<Mutex<client::ClientForBackendServer>>> {
-        self.backends.get(&source_map.file_type)
+    async fn get_backend(&self, source_map: &SourceMap) -> Option<&mut client::ClientForBackendServer> {
+        info!("Backends available: {:?}", self.backends);
+        if let Some(backend) = self.backends.lock().await.get(&source_map.file_type) {
+            return Some(*backend)
+
+        }
+        None
     }
 
     async fn get_diff(&self, uri: &Url) -> Option<ParsedDiff> {
@@ -179,6 +179,7 @@ impl DiffLsp {
         if let Some(diff) = ParsedDiff::parse(&contents) {
             info!("Inserting diff! 2");
             let mut diff_map = self.diff_map.lock().await;
+            // self.backends.insert(k, v);
 
             if let Some(diff_before) = diff_map.get(&uri) {
                 info!("Diff before len: {:?}", diff_before.lines_map.len());
@@ -194,14 +195,14 @@ impl DiffLsp {
 }
 
 #[tower_lsp::async_trait]
-impl LanguageServer for DiffLsp {
+impl<'a> LanguageServer for DiffLsp<'a> {
     async fn initialize(&self, _: InitializeParams) -> LspResult<InitializeResult> {
         self.client
             .log_message(MessageType::WARNING, "Cruising")
             .await;
         info!("Starting initialize");
-        for backend_mutex in self.backends.values().into_iter() {
-            let mut backend = backend_mutex.lock().await;
+        // let locked = self.backends.lock().await;
+        for backend in self.backends.lock().await.values_mut() {
             info!(
                 "Diff LSP doing initialize for backend: {:?}",
                 backend.lsp_command
@@ -322,14 +323,14 @@ impl LanguageServer for DiffLsp {
             "source map: {:?} - {:?}",
             source_map.source_line, source_map.source_line_text
         );
-        let backend_mutex_res = self.get_backend(&source_map);
-        let backend_mutex = match backend_mutex_res {
+        // let backend_mutex_res = self.get_backend(&source_map);
+        let backend = match self.get_backend(&source_map) {
             Some(bm) => bm,
             None => {
                 info!("No found backend mutex!");
-                return Err(LspError::new(ErrorCode::ServerError(1)))},
+                return Err(LspError::new(ErrorCode::ServerError(1)));
+            }
         };
-        let mut backend = backend_mutex.lock().await;
         // TODO do all this mapping in an async func since there's a lot of cloning and whatnot and then futures::join! it with the backend_mutex
         let mut mapped_params = params.clone();
         let uri = uri_from_relative_filename(self.root.clone(), &source_map.file_name);
@@ -371,8 +372,8 @@ impl LanguageServer for DiffLsp {
                     continue;
                 }
 
-                if let Some(backend_mutex) = self.backends.get(&filetype.unwrap()) {
-                    let mut backend = backend_mutex.lock().await;
+                if let Some(backend) = self.backends.lock().await.get(&filetype.unwrap()) {
+                    // let mut backend = backend_mutex.lock().await;
                     let mut these_params = params.clone();
                     // Here we need to break the LSP contract and use the originator's didOpen URI to read the contents of the file.
 
@@ -397,8 +398,7 @@ impl LanguageServer for DiffLsp {
                         // these_params.text_document.text
                     );
                     backend.did_open(&these_params);
-                }
-                else {
+                } else {
                 }
             }
         }
