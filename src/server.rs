@@ -116,25 +116,11 @@ impl DiffLsp {
             client,
             backends,
             diff_map: Mutex::new((|| {
-                // TODO Actually set diff during textDocument/didOpen
                 let map: HashMap<Url, ParsedDiff> = HashMap::new();
-                // let diff_path = expanduser("~/.diff-lsp-tempfile").unwrap();
-
-                // let contents = fs::read_to_string(diff_path.clone()).unwrap();
-                // let diff = ParsedDiff::parse(&contents);
-                // let str_diff_path = diff_path.to_str().unwrap();
-                // map.insert(Url::from_file_path(str_diff_path).unwrap(), diff.unwrap());
                 map
             })()),
-            // Lazydiff_map,
             root,
         };
-
-        // server.diff_map.insert(
-        //     Url::from_file_path(str_diff_path).unwrap(),
-        //     diff.unwrap(),
-        // );
-
         info!("Starting server: {:?}", server);
         server
     }
@@ -206,8 +192,6 @@ impl LanguageServer for DiffLsp {
                 backend.lsp_command
             );
             backend.initialize().unwrap();
-            //info!("LspResult for that initialize: {:?}", res);
-            //return Ok(res);
         }
 
         let res = Ok(InitializeResult {
@@ -230,11 +214,6 @@ impl LanguageServer for DiffLsp {
             ..Default::default()
         });
         info!("Finished initialize! {:?}", res.clone().unwrap());
-        // let init_task = tokio::task::spawn(async {
-        //     tokio::time::sleep(tokio::time::Duration::from_secs(1));
-        //     self.client.send_notification::<Initialized>(InitializedParams{}).await;
-        // }
-        // );
         res
     }
 
@@ -296,10 +275,6 @@ impl LanguageServer for DiffLsp {
     }
 
     async fn hover(&self, params: HoverParams) -> LspResult<Option<Hover>> {
-        //  let output = Hover {
-        //      contents: HoverContents::Scalar(MarkedString::from_markdown("Hover Text".to_string())),
-        //      range: None,
-        // };
         info!(
             "Doing hover: {:?}-{:?}",
             params.text_document_position_params.position.line,
@@ -357,7 +332,6 @@ impl LanguageServer for DiffLsp {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        // info!("Opened document: {:?}", params);  // uncomment to show that we get diff-test as our did open, but we send the real file to the backend
         if let Some(diff) = self.refresh_file(&params.text_document.uri).await {
             let filtered_files: Vec<String> = diff.filenames.clone().into_iter().unique().collect();
             for filename in filtered_files {
@@ -371,28 +345,25 @@ impl LanguageServer for DiffLsp {
                     let mut backend = backend_mutex.lock().await;
                     let mut these_params = params.clone();
                     // Here we need to break the LSP contract and use the originator's didOpen URI to read the contents of the file.
-
-                    // 2025-07-07 22:03:47 - INFO - Calling Did open to "rust-analyzer" for file "file:///home/chris/diff-lsp/src/server.rs";
-
                     these_params.text_document.uri =
                         uri_from_relative_filename(self.root.clone(), &filename);
 
-                    // lol back to a regular filename
                     let full_path = these_params
                         .text_document
                         .uri
                         .as_str()
                         .replace("file://", "");
                     info!("Opening filename: {:?}", full_path);
-                    let text = fs::read_to_string(full_path).unwrap();
-                    these_params.text_document.text = text;
-                    info!(
-                        "Calling Did open to {:?} for file {:?};",
-                        backend.lsp_command,
-                        these_params.text_document.uri.as_str(),
-                        // these_params.text_document.text
-                    );
-                    backend.did_open(&these_params);
+                    let text_result = fs::read_to_string(&full_path);
+                    match text_result {
+                        Ok(text) => {
+                            these_params.text_document.text = text;
+                            backend.did_open(&these_params);
+                        }
+                        Err(_) => {
+                            info!("Skipping opening file {:?}", full_path);
+                        }
+                    }
                 }
             }
         }
@@ -445,8 +416,6 @@ impl LanguageServer for DiffLsp {
         &self,
         _params: GotoDefinitionParams,
     ) -> LspResult<Option<GotoDefinitionResponse>> {
-        //info!("goto_definition not yet implemented.");
-
         let source_map = self
             .get_source_map(_params.text_document_position_params.clone())
             .await
