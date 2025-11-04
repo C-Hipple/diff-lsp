@@ -309,6 +309,20 @@ impl ClientForBackendServer {
             Err(_) => return Ok(None),
         }
     }
+
+    pub fn check_messages(&mut self) {
+        let std_out = self.process.stdout.as_mut().unwrap();
+        let mut stdout_reader = BufReader::new(std_out);
+        let resp = read_message(&mut stdout_reader);
+        match resp {
+            Ok(r) => {
+                info!("{}", r)
+            }
+            Err(e) => {
+                info!("{}", e)
+            }
+        }
+    }
 }
 
 pub enum LspHeader {
@@ -371,7 +385,7 @@ pub fn read_message<T: BufRead>(reader: &mut T) -> Result<String> {
         info!("{}", body);
         read_message(reader)
     } else {
-        // println!("body {}", body);
+        info!("MISC body {}", body);
         Ok(body)
     }
 }

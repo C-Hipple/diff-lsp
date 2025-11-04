@@ -269,6 +269,13 @@ impl LanguageServer for DiffLsp {
             let mut child = fetch_origin_nonblocking(&self.root);
             let _ = child.wait().await;
             Ok(None)
+        } else if params.command == "check" {
+            info!("Doing check!");
+            for backend_mutex in self.backends.values().into_iter() {
+                let mut backend = backend_mutex.lock().await;
+                backend.check_messages();
+            }
+            Ok(None)
         } else {
             Err(LspError::invalid_request())
         }
