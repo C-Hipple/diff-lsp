@@ -83,5 +83,4 @@ async fn main() {
     Server::new(stdin, stdout, socket)
         .serve(diff_lsp_service)
         .await;
-    println!("Goodbye world.");
 }
