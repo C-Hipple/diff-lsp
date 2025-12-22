@@ -139,7 +139,8 @@ impl ParsedDiff {
 
 impl Parsable for ParsedDiff {
     fn parse(source: &str) -> Option<ParsedDiff> {
-        if source.contains("Type: code-review") {
+        if source.contains("Type: code-review") || source.contains("Type: my-code-review") {
+            // Supports both old (code-review) and new (my-code-review / code-review-server) formats
             CodeReviewDiff::parse(source)
         } else if source.contains("Type: magit-status") {
             MagitDiff::parse(source)
@@ -151,7 +152,8 @@ impl Parsable for ParsedDiff {
 }
 
 pub fn is_file_header(line: &str) -> bool {
-    return line.starts_with("modified  ")
-        || line.starts_with("new file  ")
-        || line.starts_with("deleted  ");
+    // Handle variable whitespace - new code-review-server format uses more spaces
+    return line.starts_with("modified ")
+        || line.starts_with("new file ")
+        || line.starts_with("deleted ");
 }

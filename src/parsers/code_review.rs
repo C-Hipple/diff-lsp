@@ -88,23 +88,45 @@ impl CodeReviewDiff {
                     }
                 }
 
-                if building_hunk
-                    && (line.starts_with("Reviewed by") || line.starts_with("Comment by"))
-                {
-                    info!("D: ({:?}) Review Start : {}", line_num, line);
-                    in_review = true;
-                    continue;
-                }
-                if in_review && line.starts_with("-------") {
-                    info!("D: ({:?}) Review End: {}", line_num, line);
-                    in_review = false;
-                    continue;
-                }
 
+                if building_hunk {
+                    // Handle old format (Reviewed by / Comment by)
+                    if line.starts_with("Reviewed by") || line.starts_with("Comment by") {
+                        info!("D: ({:?}) Review Start (old format): {}", line_num, line);
+                        in_review = true;
+                        continue;
+                    }
+                    
+                    // Handle new format (box-drawing comments from code-review-server)
+                    // Comment boxes start with "    ┌─ REVIEW COMMENT ─────"
+                    if line.trim_start().starts_with("┌─ REVIEW COMMENT") {
+                        info!("D: ({:?}) Box Comment Start (new format): {}", line_num, line);
+                        in_review = true;
+                        continue;
+                    }
+                }
+                
                 if in_review {
+                    // Handle old format end (dashed line)
+                    if line.starts_with("-------") {
+                        info!("D: ({:?}) Review End (old format): {}", line_num, line);
+                        in_review = false;
+                        continue;
+                    }
+                    
+                    // Handle new format end (box-drawing bottom)
+                    // Comment boxes end with "    └──────────────────────────────"
+                    if line.trim_start().starts_with("└") {
+                        info!("D: ({:?}) Box Comment End (new format): {}", line_num, line);
+                        in_review = false;
+                        continue;
+                    }
+                    
+                    // Skip all lines within comments (both formats)
                     info!("D: ({:?}) Review Line: {}", line_num, line);
                     continue;
                 }
+
 
                 if building_hunk && !is_file_header(line) {
                     let line_type = LineType::from_line(line);
