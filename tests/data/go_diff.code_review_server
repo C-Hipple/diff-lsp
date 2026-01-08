@@ -1,0 +1,681 @@
+Project: * Review C-Hipple/gtdbot #9 *
+Root: /home/chris/code-review-server/
+Buffer: code-review-server
+Type: my-code-review
+#9: feature: implement calling out to release check
+Author: 	@C-Hipple
+Title: 	feature: implement calling out to release check
+State: 	closed
+Refs: 	main ... feature/include-release-callout
+Milestone: 	No milestone
+Labels: 	None yet
+Projects: 	None yet
+Draft: 	false
+Assignees: 	No one -- Assign yourself
+Suggested-Reviewers: No suggestions
+Reviewers: 	
+CI Status: 	pending (1/1 checks passed)
+
+Commits (4)
+9094cf7 implement calling out to release check, totally untested
+0f21d2b todo update
+39c02e3 add serializer to filechanges
+6946975 Merge branch 'main' of github.com:/C-Hipple/gtdbot into feature/include-release-callout
+
+Description
+
+add parsing option on serializer
+
+Your Review Feedback
+Leave a comment here.
+
+Conversation
+No conversation found.
+
+Files changed (9 files; 169 additions, 129 deletions)
+
+modified     README.md
+
+@@ -33,6 +33,7 @@ Owner: str
+  Filters: list[str]
+  OrgFileName: str
+  SectionTitle: str
++ ReleaseCommandCheck: str
+  Prune: bool
+  ```
+  
+
+@@ -119,3 +120,26 @@ OrgFileName = "reviews.org"
+  SectionTitle = "Diff LSP Upgrade Project"
+  JiraEpic = "BOARD-123" # the epic key
+  ```
++ 
++ 
++ ## Release Checking
++ 
++ Often for work-workflows, it's very important to know when your particular PR is not just merged, but released to production, or in a release client.
++ 
++ You can configure a release check command which is run when PRs are added to the org file or updated.  GTDBOT will call-out to that program and expected a single string in response for
++ 
++ example. If we have a program on our PATH variable named release-check, you should call it like this:
++ 
++ ```
++ $ release-check C-Hipple gtdbot abcdef
++ released
++ 
++ $ release-check C-Hipple gtdbot hijklm
++ release-client
++ 
++ $ release-check C-Hipple gtdbot nopqrs
++ merged
++ ```
++ 
++ 
++ That string will then be put into the title line of the PR via the org-serializer.
+modified     config.go
+
+@@ -17,18 +17,20 @@ type Config struct {
+  	Workflows []workflows.Workflow
+  }
+  
+    ┌─ REVIEW COMMENT ─────────────────
+    │ File: config.go
+    │ 0001-01-01 00:00:00 local : 5
+    │
+    │ [local]:
+    │   on the comment // this struct
+    └──────────────────────────────────
++ // This struct implements all possible values a workflow can define, then they're written as-needed.
+  type RawWorkflow struct {
+- 	WorkflowType string
+- 	Name         string
+- 	Owner        string
+- 	Repo         string
+- 	Repos        []string
+- 	JiraEpic     string
+- 	Filters      []string
+- 	OrgFileName  string
+- 	SectionTitle string
+- 	PRState      string
+- 	Prune        bool
+    ┌─ REVIEW COMMENT ─────────────────
+    │ File: config.go
+    │ 2025-12-14 22:13:12 C-Hipple|local : 2617542990
+    │
+    │ [C-Hipple]:
+    │   creating a local reply
+    │
+    │ Reply by [local]:[6]
+    │   reply to "creating a local reply"
+    └──────────────────────────────────
++ 	WorkflowType        string
+    ┌─ REVIEW COMMENT ─────────────────
+    │ File: config.go
+    │ 2025-05-03 01:55:55 C-Hipple : 2072280927
+    │
+    │ [C-Hipple]:
+    │   thanks for fixing the spacing
+    │
+    │ Reply by [C-Hipple]:[2076614371]
+    │   creating a comment tree
+    └──────────────────────────────────
++ 	Name                string
++ 	Owner               string
++ 	Repo                string
++ 	Repos               []string
+    ┌─ REVIEW COMMENT ─────────────────
+    │ File: config.go
+    │ 2025-12-14 22:13:12 C-Hipple : 2617542991
+    │
+    │ [C-Hipple]:
+    │   hey
+    └──────────────────────────────────
++ 	JiraEpic            string
+    ┌─ REVIEW COMMENT ─────────────────
+    │ File: config.go
+    │ 2025-12-14 22:45:04 C-Hipple : 2617564471
+    │
+    │ [C-Hipple]:
+    │   hi2reply1
+    └──────────────────────────────────
++ 	Filters             []string
+    ┌─ REVIEW COMMENT ─────────────────
+    │ File: config.go
+    │ 2025-12-14 22:13:12 C-Hipple : 2617542989
+    │
+    │ [C-Hipple]:
+    │   hi2
+    └──────────────────────────────────
+    ┌─ REVIEW COMMENT ─────────────────
+    │ File: config.go
+    │ 2025-12-14 22:35:26 C-Hipple : 2617558595
+    │
+    │ [C-Hipple]:
+    │   hey
+    └──────────────────────────────────
++ 	OrgFileName         string
+    ┌─ REVIEW COMMENT ─────────────────
+    │ File: config.go
+    │ 2025-12-14 22:13:12 C-Hipple : 2617542988
+    │
+    │ [C-Hipple]:
+    │   hi
+    └──────────────────────────────────
++ 	SectionTitle        string
+    ┌─ REVIEW COMMENT ─────────────────
+    │ File: config.go
+    │ 0001-01-01 00:00:00 local : 3
+    │
+    │ [local]:
+    │   hi
+    └──────────────────────────────────
++ 	PRState             string
+    ┌─ REVIEW COMMENT ─────────────────
+    │ File: config.go
+    │ 0001-01-01 00:00:00 local : 4
+    │
+    │ [local]:
+    │   on releasecheckcommand
+    └──────────────────────────────────
++ 	ReleaseCheckCommand string
++ 	Prune               bool
+  }
+  
+  func LoadConfig() Config {
+
+@@ -76,55 +78,59 @@ func MatchWorkflows(workflow_maps []RawWorkflow, repos *[]string, jiraDomain str
+  
+  func BuildSingleRepoReviewWorkflow(raw *RawWorkflow, repos *[]string) workflows.Workflow {
+  	wf := workflows.SingleRepoSyncReviewRequestsWorkflow{
+- 		Name:         raw.Name,
+- 		Owner:        raw.Owner,
+- 		Repo:         raw.Repo,
+- 		Filters:      BuildFiltersList(raw.Filters),
+- 		OrgFileName:  raw.OrgFileName,
+- 		SectionTitle: raw.SectionTitle,
+- 		Prune:        raw.Prune,
++ 		Name:                raw.Name,
++ 		Owner:               raw.Owner,
++ 		Repo:                raw.Repo,
++ 		Filters:             BuildFiltersList(raw.Filters),
++ 		OrgFileName:         raw.OrgFileName,
++ 		SectionTitle:        raw.SectionTitle,
++ 		ReleaseCheckCommand: raw.ReleaseCheckCommand,
++ 		Prune:               raw.Prune,
+  	}
+  	return wf
+  }
+  
+  func BuildSyncReviewRequestWorkflow(raw *RawWorkflow, repos *[]string) workflows.Workflow {
+  	wf := workflows.SyncReviewRequestsWorkflow{
+- 		Name:         raw.Name,
+- 		Owner:        raw.Owner,
+- 		Repos:        *repos,
+- 		Filters:      BuildFiltersList(raw.Filters),
+- 		OrgFileName:  raw.OrgFileName,
+- 		SectionTitle: raw.SectionTitle,
+- 		Prune:        raw.Prune,
++ 		Name:                raw.Name,
++ 		Owner:               raw.Owner,
++ 		Repos:               *repos,
++ 		Filters:             BuildFiltersList(raw.Filters),
++ 		OrgFileName:         raw.OrgFileName,
++ 		SectionTitle:        raw.SectionTitle,
++ 		ReleaseCheckCommand: raw.ReleaseCheckCommand,
++ 		Prune:               raw.Prune,
+  	}
+  	return wf
+  }
+  
+  func BuildListMyPRsWorkflow(raw *RawWorkflow, repos *[]string) workflows.Workflow {
+  	wf := workflows.ListMyPRsWorkflow{
+- 		Name:         raw.Name,
+- 		Owner:        raw.Owner,
+- 		Repos:        *repos,
+- 		Filters:      BuildFiltersList(raw.Filters),
+- 		PRState:      raw.PRState,
+- 		OrgFileName:  raw.OrgFileName,
+- 		SectionTitle: raw.SectionTitle,
+- 		Prune:        raw.Prune,
++ 		Name:                raw.Name,
++ 		Owner:               raw.Owner,
++ 		Repos:               *repos,
++ 		Filters:             BuildFiltersList(raw.Filters),
++ 		PRState:             raw.PRState,
++ 		OrgFileName:         raw.OrgFileName,
++ 		SectionTitle:        raw.SectionTitle,
++ 		ReleaseCheckCommand: raw.ReleaseCheckCommand,
++ 		Prune:               raw.Prune,
+  	}
+  	return wf
+  }
+  
+  func BuildProjectListWorkflow(raw *RawWorkflow, jiraDomain string) workflows.Workflow {
+  	wf := workflows.ProjectListWorkflow{
+- 		Name:         raw.Name,
+- 		Owner:        raw.Owner,
+- 		Repo:         raw.Repo,
+- 		JiraDomain:   jiraDomain,
+- 		JiraEpic:     raw.JiraEpic,
+- 		Filters:      BuildFiltersList(raw.Filters),
+- 		OrgFileName:  raw.OrgFileName,
+- 		SectionTitle: raw.SectionTitle,
+- 		Prune:        raw.Prune,
++ 		Name:                raw.Name,
++ 		Owner:               raw.Owner,
++ 		Repo:                raw.Repo,
++ 		JiraDomain:          jiraDomain,
++ 		JiraEpic:            raw.JiraEpic,
++ 		Filters:             BuildFiltersList(raw.Filters),
++ 		OrgFileName:         raw.OrgFileName,
++ 		SectionTitle:        raw.SectionTitle,
++ 		ReleaseCheckCommand: raw.ReleaseCheckCommand,
++ 		Prune:               raw.Prune,
+  	}
+  	return wf
+  }
+modified     git_tools/github_notifications.go
+
+@@ -11,7 +11,7 @@ import (
+  type NotificationTODO struct {
+  }
+  
+- func (n NotificationTODO) FullLine(indent_level int) string {
++ func (n NotificationTODO) ItemTitle(indent_level int) string {
+  	return "abc"
+  }
+  
+modified     main.go
+
+@@ -21,7 +21,7 @@ func main() {
+  	initOnly := flag.Bool("init", false, "Pass init to only only setup the org file.")
+  	flag.Parse()
+  	if *parse {
+- 		doc := org.GetBaseOrgDocument("reviews.org")
++ 		doc := org.GetOrgDocument("reviews.org", org.BaseOrgSerializer{})
+    ┌─ REVIEW COMMENT ─────────────────
+    │ File: main.go
+    │ 2025-05-05 01:44:56 C-Hipple|local : 2072773595
+    │
+    │ [C-Hipple]:
+    │   shoudl we make a new helper?
+    │
+    │ Reply by [local]:[1]
+    │   reply to "should we make a new helper"
+    └──────────────────────────────────
+  		doc.PrintAll()
+  		return
+  	}
+modified     org/org.go
+
+@@ -7,7 +7,7 @@ import (
+  )
+  
+  type OrgTODO interface {
+- 	FullLine(indent_level int) string
++ 	ItemTitle(indent_level int, release_check_command string) string
+  	Summary() string
+  	Details() []string
+  	GetStatus() string
+modified     org/org_parser.go
+
+@@ -21,11 +21,6 @@ type OrgDocument struct {
+  	Serializer OrgSerializer
+  }
+  
+- func GetBaseOrgDocument(file_name string) OrgDocument {
+- 	return GetOrgDocument(file_name, BaseOrgSerializer{})
+- 
+- }
+- 
+  func GetOrgDocument(file_name string, serializer OrgSerializer) OrgDocument {
+  	file := GetOrgFile(file_name)
+  	all_lines, _ := utils.LinesFromReader(file)
+
+@@ -135,7 +130,7 @@ func (o OrgDocument) PrintAll() {
+  		fmt.Println(section.Header())
+  		fmt.Println(section.StartLine)
+  		for _, item := range section.Items {
+- 			fmt.Println(item.FullLine(section.IndentLevel + 1))
++ 			fmt.Println(item.ItemTitle(section.IndentLevel+1, ""))
+  			fmt.Println(item.StartLine(), item.LinesCount(), item.StartLine()+item.LinesCount())
+  		}
+  	}
+
+@@ -340,7 +335,7 @@ func NewOrgItem(header string, details []string, status string, tags []string, s
+  }
+  
+  // Implement the OrgTODO Interface for OrgItem
+- func (oi OrgItem) FullLine(indent_level int) string {
++ func (oi OrgItem) ItemTitle(indent_level int, release_command_check string) string {
+  	return strings.Repeat("*", indent_level) + oi.header
+  }
+  
+
+@@ -411,13 +406,15 @@ type OrgSerializer interface {
+  	Serialize(lines []string, start_line int) (OrgTODO, error)
+  }
+  
+- type BaseOrgSerializer struct{}
++ type BaseOrgSerializer struct {
++ 	ReleaseCheckCommand string
++ }
+  
+  // Implement the OrgSerializer interface with our most generic structs / interfaces
+  
+  func (bos BaseOrgSerializer) Deserialize(item OrgTODO, indent_level int) []string {
+  	var result []string
+- 	result = append(result, item.FullLine(indent_level))
++ 	result = append(result, item.ItemTitle(indent_level, bos.ReleaseCheckCommand))
+  	result = append(result, item.Details()...)
+  	return result
+  }
+
+@@ -431,23 +428,3 @@ func (bos BaseOrgSerializer) Serialize(lines []string, start_line int) (OrgTODO,
+  	tags := findOrgTags(lines[0])
+  	return OrgItem{header: lines[0], status: status, details: lines[1:], tags: tags, start_line: start_line, lines_count: len(lines)}, nil
+  }
+- 
+- type MergeInfoOrgSerializer struct{}
+- 
+- func (ser MergeInfoOrgSerializer) Deserialize(item OrgTODO, indent_level int) []string {
+- 	var result []string
+- 	result = append(result, item.FullLine(indent_level))
+- 	result = append(result, item.Details()...)
+- 	return result
+- }
+- 
+- func (bos MergeInfoOrgSerializer) Serialize(lines []string, start_line int) (OrgTODO, error) {
+- 	// each one has the format ** TODO URL Title.  Check stars to allow for auxillary text between items
+- 	if len(lines) == 0 {
+- 		return OrgItem{}, errors.New("No Lines passed for serialization")
+- 	}
+- 	status := findOrgStatus(lines[0])
+- 	tags := findOrgTags(lines[0])
+- 
+- 	return OrgItem{header: lines[0], status: status, details: lines[1:], tags: tags, start_line: start_line, lines_count: len(lines)}, nil
+- }
+modified     workflows/logic.go
+
+@@ -1,11 +1,13 @@
+  package workflows
+  
+  import (
++ 	"bytes"
+  	"context"
+  	"fmt"
+  	"gtdbot/git_tools"
+  	"gtdbot/org"
+  	"gtdbot/utils"
++ 	"os/exec"
+  	"regexp"
+  	"slices"
+  	"strings"
+
+@@ -23,10 +25,11 @@ type Workflow interface {
+  }
+  
+  type FileChanges struct {
+- 	ChangeType string
+- 	Filename   string
+- 	Item       org.OrgTODO
+- 	Section    org.Section
++ 	ChangeType     string
++ 	Filename       string
++ 	Item           org.OrgTODO
++ 	Section        org.Section
++ 	ItemSerializer org.OrgSerializer
+  }
+  
+  type PRToOrgBridge struct {
+
+@@ -61,13 +64,21 @@ func (prb PRToOrgBridge) Title() string {
+  	return *prb.PR.Title
+  }
+  
+- func (prb PRToOrgBridge) FullLine(indent_level int) string {
++ func (prb PRToOrgBridge) ItemTitle(indent_level int, release_check_command string) string {
+  	line := fmt.Sprintf("%s %s %s\t\t:%s:", strings.Repeat("*", indent_level), prb.GetStatus(), prb.Title(), *prb.PR.Head.Repo.Name)
+- 	//fmt.Println("Here: ", prb.Title(), prb.PR.Merged, prb.PR.MergedAt)
+  	if *prb.PR.Draft {
+  		line = line + ":draft:"
+  	} else if prb.PR.MergedAt != nil {
+- 		line = line + "merged:"
++ 		if release_check_command != "" {
++ 			status, err := GetReleaseStatus(&release_check_command, prb.PR.Head.Repo.Name, prb.PR.MergeCommitSHA)
++ 			if err != nil {
++ 				line = line + "merged:"
++ 			} else {
++ 				line = line + status + ":"
++ 			}
++ 		} else {
++ 			line = line + "merged:"
++ 		}
+  	}
+  	return line
+  }
+
+@@ -262,10 +273,11 @@ func ProcessPRs(prs []*github.PullRequest, changes_channel chan FileChanges, doc
+  			} else {
+  				// fmt.Println("No longer need to review: ", check_string)
+  				fileChange := FileChanges{
+- 					ChangeType: "Delete",
+- 					Filename:   doc.Filename,
+- 					Item:       item,
+- 					Section:    *section,
++ 					ChangeType:     "Delete",
++ 					Filename:       doc.Filename,
++ 					Item:           item,
++ 					Section:        *section,
++ 					ItemSerializer: doc.Serializer,
+  				}
+  				changes = append(changes, fileChange)
+  			}
+
+@@ -286,17 +298,19 @@ func SyncTODOToSection(doc org.OrgDocument, pr *github.PullRequest, section org.
+  	if at_line != -1 {
+  		// TODO : Determine if actual changes?
+  		return FileChanges{
+- 			ChangeType: "Update",
+- 			Filename:   doc.Filename,
+- 			Item:       pr_as_org,
+- 			Section:    section,
++ 			ChangeType:     "Update",
++ 			Filename:       doc.Filename,
++ 			Item:           pr_as_org,
++ 			Section:        section,
++ 			ItemSerializer: doc.Serializer,
+  		}
+  	}
+  	return FileChanges{
+- 		ChangeType: "Addition",
+- 		Filename:   doc.Filename,
+- 		Item:       pr_as_org,
+- 		Section:    section,
++ 		ChangeType:     "Addition",
++ 		Filename:       doc.Filename,
++ 		Item:           pr_as_org,
++ 		Section:        section,
++ 		ItemSerializer: doc.Serializer,
+  	}
+  }
+  
+
+@@ -366,6 +380,24 @@ func processWorkflowRuns(runs []*github.WorkflowRun) []*github.WorkflowRun {
+  	return output
+  }
+  
++ // If a command was given by the workflow,
++ func GetReleaseStatus(command *string, repo *string, sha *string) (string, error) {
++ 	cmd := exec.Command(*command, *repo, *sha)
++ 
++ 	var outb, errb bytes.Buffer
++ 	cmd.Stdout = &outb
++ 	cmd.Stderr = &errb
++ 
++ 	err := cmd.Run()
++ 
++ 	if err != nil {
++ 		return "", err
++ 	}
++ 
++ 	stdout := outb.String()
++ 	return strings.Replace(stdout, "\n", "", -1), nil
++ 
++ }
+  func filterComments(comments []*github.PullRequestComment) []*github.PullRequestComment {
+  	output := []*github.PullRequestComment{}
+  	for _, comment := range comments {
+modified     workflows/manager.go
+
+@@ -18,7 +18,7 @@ type ManagerService struct {
+  func ListenChanges(channel chan FileChanges, wg *sync.WaitGroup) {
+  	for file_change := range channel {
+  		if file_change.ChangeType != "No Change" {
+- 			doc := org.GetBaseOrgDocument(file_change.Filename)
++ 			doc := org.GetOrgDocument(file_change.Filename, file_change.ItemSerializer)
+  			if file_change.ChangeType == "Addition" {
+  				fmt.Println("Adding item in section: ", file_change.Item.Summary())
+  				doc.AddItemInSection(file_change.Section.Name, &file_change.Item)
+
+@@ -105,7 +105,8 @@ func (ms *ManagerService) Initialize() {
+  	// Ensure all required sections exist.
+  	// Does this sync since GetSection has creation side effect
+  	for _, wf := range ms.Workflows {
+- 		doc := org.GetBaseOrgDocument(wf.GetOrgFilename())
++ 		// Don't need to check release command here
++ 		doc := org.GetOrgDocument(wf.GetOrgFilename(), org.BaseOrgSerializer{ReleaseCheckCommand: ""})
+  		doc.GetSection(wf.GetOrgSectionName())
+  	}
+  }
+modified     workflows/workflows.go
+
+@@ -32,16 +32,14 @@ func (rr *RunResult) Report() string {
+  }
+  
+  type SingleRepoSyncReviewRequestsWorkflow struct {
+- 	// Github repo info
+- 	Name    string
+- 	Owner   string
+- 	Repo    string
+- 	Filters []git_tools.PRFilter
+- 	Prune   bool
+- 
+- 	// org output info
+- 	OrgFileName  string
+- 	SectionTitle string
++ 	Name                string
++ 	Owner               string
++ 	Repo                string
++ 	Filters             []git_tools.PRFilter
++ 	OrgFileName         string
++ 	SectionTitle        string
++ 	ReleaseCheckCommand string
++ 	Prune               bool
+  }
+  
+  func (w SingleRepoSyncReviewRequestsWorkflow) GetName() string {
+
+@@ -65,7 +63,7 @@ func (w SingleRepoSyncReviewRequestsWorkflow) Run(c chan FileChanges, file_chang
+  	)
+  
+  	prs = git_tools.ApplyPRFilters(prs, w.Filters)
+- 	doc := org.GetBaseOrgDocument(w.OrgFileName)
++ 	doc := org.GetOrgDocument(w.OrgFileName, org.BaseOrgSerializer{ReleaseCheckCommand: w.ReleaseCheckCommand})
+  	section, err := doc.GetSection(w.SectionTitle)
+  	if err != nil {
+  		fmt.Println("Error getting section: ", err, w.SectionTitle)
+
+@@ -85,15 +83,16 @@ type SyncReviewRequestsWorkflow struct {
+  	Prune   bool
+  
+  	// org output info
+- 	OrgFileName  string
+- 	SectionTitle string
++ 	OrgFileName         string
++ 	SectionTitle        string
++ 	ReleaseCheckCommand string
+  }
+  
+  func (w SyncReviewRequestsWorkflow) Run(c chan FileChanges, file_change_wg *sync.WaitGroup) (RunResult, error) {
+  	client := git_tools.GetGithubClient()
+  	prs := git_tools.GetManyRepoPRs(client, "open", w.Owner, w.Repos)
+  	prs = git_tools.ApplyPRFilters(prs, w.Filters)
+- 	doc := org.GetBaseOrgDocument(w.OrgFileName)
++ 	doc := org.GetOrgDocument(w.OrgFileName, org.BaseOrgSerializer{ReleaseCheckCommand: w.ReleaseCheckCommand})
+  	section, err := doc.GetSection(w.SectionTitle)
+  	if err != nil {
+  		fmt.Println("Error getting section: ", err, w.SectionTitle)
+
+@@ -116,15 +115,15 @@ func (w SyncReviewRequestsWorkflow) GetOrgSectionName() string {
+  }
+  
+  type ListMyPRsWorkflow struct {
+- 	Name         string
+- 	Owner        string
+- 	Repos        []string
+- 	Filters      []git_tools.PRFilter
+- 	OrgFileName  string
+- 	SectionTitle string
+- 	PRState      string
+- 
+- 	Prune bool
++ 	Name                string
++ 	Owner               string
++ 	Repos               []string
++ 	Filters             []git_tools.PRFilter
++ 	OrgFileName         string
++ 	SectionTitle        string
++ 	PRState             string
++ 	ReleaseCheckCommand string
++ 	Prune               bool
+  }
+  
+  func (w ListMyPRsWorkflow) GetName() string {
+
+@@ -144,7 +143,7 @@ func (w ListMyPRsWorkflow) Run(c chan FileChanges, file_change_wg *sync.WaitGrou
+  	prs := git_tools.GetManyRepoPRs(client, w.PRState, w.Owner, w.Repos)
+  
+  	prs = git_tools.ApplyPRFilters(prs, w.Filters)
+- 	doc := org.GetOrgDocument(w.OrgFileName, org.MergeInfoOrgSerializer{})
++ 	doc := org.GetOrgDocument(w.OrgFileName, org.BaseOrgSerializer{ReleaseCheckCommand: w.ReleaseCheckCommand})
+  	section, err := doc.GetSection(w.SectionTitle)
+  	if err != nil {
+  		fmt.Println("Error getting section: ", err, w.SectionTitle)
+
+@@ -156,15 +155,16 @@ func (w ListMyPRsWorkflow) Run(c chan FileChanges, file_change_wg *sync.WaitGrou
+  }
+  
+  type ProjectListWorkflow struct {
+- 	Name         string
+- 	Owner        string
+- 	Repo         string
+- 	OrgFileName  string
+- 	Filters      []git_tools.PRFilter
+- 	SectionTitle string
+- 	JiraDomain   string
+- 	JiraEpic     string
+- 	Prune        bool
++ 	Name                string
++ 	Owner               string
++ 	Repo                string
++ 	OrgFileName         string
++ 	Filters             []git_tools.PRFilter
++ 	SectionTitle        string
++ 	JiraDomain          string
++ 	JiraEpic            string
++ 	ReleaseCheckCommand string
++ 	Prune               bool
+  }
+  
+  func (w ProjectListWorkflow) GetName() string {
+
+@@ -181,7 +181,7 @@ func (w ProjectListWorkflow) GetOrgSectionName() string {
+  
+  func (w ProjectListWorkflow) Run(c chan FileChanges, file_change_wg *sync.WaitGroup) (RunResult, error) {
+  	client := git_tools.GetGithubClient()
+- 	doc := org.GetOrgDocument(w.OrgFileName, org.MergeInfoOrgSerializer{})
++ 	doc := org.GetOrgDocument(w.OrgFileName, org.BaseOrgSerializer{ReleaseCheckCommand: w.ReleaseCheckCommand})
+  	section, err := doc.GetSection(w.SectionTitle)
+  	if err != nil {
+  		return RunResult{}, errors.New("Section Not Found")
