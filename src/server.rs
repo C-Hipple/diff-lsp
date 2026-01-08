@@ -52,7 +52,7 @@ impl Notification for CustomNotification {
 pub fn create_backends_map(
     active_langs: Vec<SupportedFileType>,
     dir: &str,
-) -> HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>> {
+) -> Result<HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>>> {
     let mut backends: HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>> =
         HashMap::new();
 
@@ -63,12 +63,14 @@ pub fn create_backends_map(
             backends.insert(
                 supported_lang,
                 Arc::new(Mutex::new(client::ClientForBackendServer::new(
-                    command, args, dir,
-                ))),
+                    command,
+                    args,
+                    dir,
+                )?)),
             );
         }
     }
-    backends
+    Ok(backends)
 }
 
 pub fn read_initialization_params_from_tempfile(
