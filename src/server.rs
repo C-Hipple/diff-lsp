@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::read_to_string;
 use strum::IntoEnumIterator;
 
+use expanduser::expanduser;
 use log::info;
 use std::collections::HashMap;
 use std::fs;
@@ -109,7 +110,11 @@ pub fn read_initialization_params_from_tempfile(
                 }
             }
         }
-        Ok((cwd, get_unique_elements(&file_types)))
+        let expanded_cwd = expanduser(cwd)?
+            .into_os_string()
+            .into_string()
+            .map_err(|_| anyhow!("Failed to convert path to string"))?;
+        Ok((expanded_cwd, get_unique_elements(&file_types)))
     } else {
         return Err(anyhow!("Unable to read input tempfile"));
     }

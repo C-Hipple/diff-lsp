@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use expanduser::expanduser;
 use log::info;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
@@ -34,8 +35,9 @@ fn start_server(command: String, args: Option<String>, dir: &str) -> Result<Chil
     if let Some(args_val) = args {
         process.args(args_val.split_whitespace());
     }
+    let expanded_dir = expanduser(dir)?;
     let child = process
-        .current_dir(canonicalize(dir)?)
+        .current_dir(canonicalize(expanded_dir)?)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
