@@ -155,5 +155,6 @@ pub fn is_file_header(line: &str) -> bool {
     // Handle variable whitespace - new code-review-server format uses more spaces
     return line.starts_with("modified ")
         || line.starts_with("new file ")
-        || line.starts_with("deleted ");
+        || line.starts_with("deleted ")
+        || line.starts_with("diff --git ");
 }

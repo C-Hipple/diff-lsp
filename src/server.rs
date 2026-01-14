@@ -59,7 +59,7 @@ pub fn create_backends_map(
     for supported_lang in SupportedFileType::iter() {
         if active_langs.contains(&supported_lang) {
             let (command, args) = get_lsp_for_file_type(supported_lang);
-            info!("Starting client for server: {:?}", command);
+            info!("Starting client for server: {:?} in dir {:?}", command, dir);
             backends.insert(
                 supported_lang,
                 Arc::new(Mutex::new(client::ClientForBackendServer::new(
@@ -81,6 +81,8 @@ pub fn read_initialization_params_from_tempfile(
         let mut file_types: Vec<SupportedFileType> = vec![];
         let root_regex = Regex::new(r"^Root:\s(.*)").unwrap();
         let file_regex = Regex::new(r"^(modified|new file|deleted)\s+(.*)").unwrap();
+        let diff_git_regex = Regex::new(r"^diff --git\s+(.*)").unwrap();
+
         for line in input.lines() {
             if let Some(caps) = root_regex.captures(line) {
                 cwd = caps.get(1).unwrap().as_str().to_string();
@@ -89,6 +91,19 @@ pub fn read_initialization_params_from_tempfile(
             if let Some(caps) = file_regex.captures(line) {
                 println!("caps: {:?}", caps.len());
                 let filename = caps.get(2).unwrap().as_str().to_string();
+                if let Some(file_type) = SupportedFileType::from_filename(filename) {
+                    file_types.push(file_type);
+                }
+            } else if let Some(caps) = diff_git_regex.captures(line) {
+                // Handle diff --git a/foo.rs b/foo.rs
+                // We want the last one, and strip b/
+                let files_part = caps.get(1).unwrap().as_str();
+                let last_file = files_part.split_whitespace().last().unwrap_or("");
+                let filename = if last_file.starts_with("b/") || last_file.starts_with("a/") {
+                    last_file[2..].to_string()
+                } else {
+                    last_file.to_string()
+                };
                 if let Some(file_type) = SupportedFileType::from_filename(filename) {
                     file_types.push(file_type);
                 }

@@ -55,19 +55,31 @@ impl CodeReviewDiff {
                     match DiffHeader::from_str(&caps[1]) {
                         Ok(header) => {
                             diff.headers.insert(header, caps[2].to_string());
+                            continue;
                         }
                         Err(_) => continue,
                     }
                 } else {
                     found_headers = true;
                 }
-            } else {
-                // found headers, moving onto hunks
-                line_num = i + 1;
-                if is_file_header(line) {
-                    current_filename = line.split_whitespace().last().unwrap();
+            }
+
+            // found headers, moving onto hunks
+            line_num = i + 1;
+            if is_file_header(line) {
+                    current_filename = if line.starts_with("diff --git") {
+                        let last = line.split_whitespace().last().unwrap();
+                        if last.starts_with("b/") || last.starts_with("a/") {
+                            &last[2..]
+                        } else {
+                            last
+                        }
+                    } else {
+                        line.split_whitespace().last().unwrap()
+                    };
                     info!("Current filename when parsing: {:?}", current_filename);
                     diff.filenames.push(current_filename.to_string());
+                    building_hunk = false;
                 }
                 if line.starts_with("@@") && !building_hunk {
                     building_hunk = true;
@@ -154,7 +166,6 @@ impl CodeReviewDiff {
 
                     continue;
                 }
-            }
         }
         diff.total_lines = source.lines().count();
         Some(diff)

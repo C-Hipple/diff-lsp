@@ -94,14 +94,18 @@ async fn main() {
         }
     };
 
-    fetch_origin_nonblocking(&cwd);
+    info!("hurr");
+    // fetch_origin_nonblocking(&cwd);
+    info!("Starting to create backends");
     let backends = match create_backends_map(langs, &cwd) {
         Ok(b) => b,
         Err(e) => {
+            info!("Errored on starting backends map: {:?}", e);
             eprintln!("Failed to create backends for directory {}: {}", cwd, e);
             return;
         }
     };
+    info!("Done create backends");
     let (diff_lsp_service, socket) =
         LspService::new(|client| DiffLsp::new(client, backends, cwd.to_string()));
 
