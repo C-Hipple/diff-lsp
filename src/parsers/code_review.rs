@@ -67,105 +67,105 @@ impl CodeReviewDiff {
             // found headers, moving onto hunks
             line_num = i + 1;
             if is_file_header(line) {
-                    current_filename = if line.starts_with("diff --git") {
-                        let last = line.split_whitespace().last().unwrap();
-                        if last.starts_with("b/") || last.starts_with("a/") {
-                            &last[2..]
-                        } else {
-                            last
-                        }
+                current_filename = if line.starts_with("diff --git") {
+                    let last = line.split_whitespace().last().unwrap();
+                    if last.starts_with("b/") || last.starts_with("a/") {
+                        &last[2..]
                     } else {
-                        line.split_whitespace().last().unwrap()
-                    };
-                    info!("Current filename when parsing: {:?}", current_filename);
-                    diff.filenames.push(current_filename.to_string());
-                    building_hunk = false;
-                }
-                if line.starts_with("@@") && !building_hunk {
-                    building_hunk = true;
-                    info!("({:?}) Parsing Header `{}`", line_num, line);
+                        last
+                    }
+                } else {
+                    line.split_whitespace().last().unwrap()
+                };
+                info!("Current filename when parsing: {:?}", current_filename);
+                diff.filenames.push(current_filename.to_string());
+                building_hunk = false;
+            }
+            if line.starts_with("@@") && !building_hunk {
+                building_hunk = true;
+                info!("({:?}) Parsing Header `{}`", line_num, line);
+                start_new = parse_header(line).unwrap().2;
+                at_source_line = 0;
+                continue;
+            }
+            if (line.starts_with("@@") && building_hunk) || line.starts_with("Recent commits") {
+                if line.starts_with("@@") {
+                    info!("B: ({:?}) Setting Header: `{}`", line_num, line);
                     start_new = parse_header(line).unwrap().2;
                     at_source_line = 0;
                     continue;
                 }
-                if (line.starts_with("@@") && building_hunk) || line.starts_with("Recent commits") {
-                    if line.starts_with("@@") {
-                        info!("B: ({:?}) Setting Header: `{}`", line_num, line);
-                        start_new = parse_header(line).unwrap().2;
-                        at_source_line = 0;
-                        continue;
-                    }
-                    if line.starts_with("Recent commits") {
-                        break;
-                    }
+                if line.starts_with("Recent commits") {
+                    break;
                 }
+            }
 
-                if building_hunk {
-                    // Handle old format (Reviewed by / Comment by)
-                    if line.starts_with("Reviewed by") || line.starts_with("Comment by") {
-                        info!("D: ({:?}) Review Start (old format): {}", line_num, line);
-                        in_review = true;
-                        continue;
-                    }
-
-                    // Handle new format (box-drawing comments from code-review-server)
-                    // Comment boxes start with "    ┌─ REVIEW COMMENT ─────"
-                    if line.trim_start().starts_with("┌─ REVIEW COMMENT") {
-                        info!(
-                            "D: ({:?}) Box Comment Start (new format): {}",
-                            line_num, line
-                        );
-                        in_review = true;
-                        continue;
-                    }
-                }
-
-                if in_review {
-                    // Handle old format end (dashed line)
-                    if line.starts_with("-------") {
-                        info!("D: ({:?}) Review End (old format): {}", line_num, line);
-                        in_review = false;
-                        continue;
-                    }
-
-                    // Handle new format end (box-drawing bottom)
-                    // Comment boxes end with "    └──────────────────────────────"
-                    if line.trim_start().starts_with("└") {
-                        info!("D: ({:?}) Box Comment End (new format): {}", line_num, line);
-                        in_review = false;
-                        continue;
-                    }
-
-                    // Skip all lines within comments (both formats)
-                    info!("D: ({:?}) Review Line: {}", line_num, line);
+            if building_hunk {
+                // Handle old format (Reviewed by / Comment by)
+                if line.starts_with("Reviewed by") || line.starts_with("Comment by") {
+                    info!("D: ({:?}) Review Start (old format): {}", line_num, line);
+                    in_review = true;
                     continue;
                 }
 
-                if building_hunk && !is_file_header(line) {
-                    let line_type = LineType::from_line(line);
-                    let diff_line = DiffLine {
-                        line_type: line_type,
-                        line: line.to_string(),
-                        source_line_number: SourceLineNumber(start_new + at_source_line),
-                    };
-
-                    // the  line_num is because line_num is 0 index, but file lines are 1 index.
-                    diff.lines_map.insert(
-                        InputLineNumber::new((line_num).try_into().unwrap()),
-                        (current_filename.to_string(), diff_line.clone()),
-                    );
-
+                // Handle new format (box-drawing comments from code-review-server)
+                // Comment boxes start with "    ┌─ REVIEW COMMENT ─────"
+                if line.trim_start().starts_with("┌─ REVIEW COMMENT") {
                     info!(
-                        "C: ({:?}) Adding line @ {:?} `{}`",
-                        line_num, diff_line.source_line_number.0, line
+                        "D: ({:?}) Box Comment Start (new format): {}",
+                        line_num, line
                     );
-
-                    if matches!(line_type, LineType::Added | LineType::Unmodified) {
-                        at_source_line += 1;
-                    }
-
+                    in_review = true;
                     continue;
                 }
+            }
+
+            if in_review {
+                // Handle old format end (dashed line)
+                if line.starts_with("-------") {
+                    info!("D: ({:?}) Review End (old format): {}", line_num, line);
+                    in_review = false;
+                    continue;
+                }
+
+                // Handle new format end (box-drawing bottom)
+                // Comment boxes end with "    └──────────────────────────────"
+                if line.trim_start().starts_with("└") {
+                    info!("D: ({:?}) Box Comment End (new format): {}", line_num, line);
+                    in_review = false;
+                    continue;
+                }
+
+                // Skip all lines within comments (both formats)
+                info!("D: ({:?}) Review Line: {}", line_num, line);
+                continue;
+            }
+
+            if building_hunk && !is_file_header(line) {
+                let line_type = LineType::from_line(line);
+                let diff_line = DiffLine {
+                    line_type: line_type,
+                    line: line.to_string(),
+                    source_line_number: SourceLineNumber(start_new + at_source_line),
+                };
+
+                // the  line_num is because line_num is 0 index, but file lines are 1 index.
+                diff.lines_map.insert(
+                    InputLineNumber::new((line_num).try_into().unwrap()),
+                    (current_filename.to_string(), diff_line.clone()),
+                );
+
+                info!(
+                    "C: ({:?}) Adding line @ {:?} `{}`",
+                    line_num, diff_line.source_line_number.0, line
+                );
+
+                if matches!(line_type, LineType::Added | LineType::Unmodified) {
+                    at_source_line += 1;
+                }
+
+                continue;
+            }
         }
         diff.total_lines = source.lines().count();
         Some(diff)
