@@ -22,7 +22,18 @@ impl LineType {
             // is 1 of these and it's unmodified
             Some('+') => LineType::Added,
             Some('-') => LineType::Removed,
-            _ => LineType::Unmodified,
+            _ => {
+                // support delta wash
+                // 70 ⋮    │-     let _ = initialize_logger().unwrap();
+                // parses as unmodified
+                if line.contains("|-") {
+                    LineType::Removed
+                } else if line.contains("|+") {
+                    LineType::Added
+                } else {
+                    LineType::Unmodified
+                }
+            } // _ => LineType::Unmodified,
         }
     }
 }
