@@ -386,7 +386,7 @@ pub fn read_message<T: BufRead>(reader: &mut T) -> Result<String> {
         info!("{}", body);
         read_message(reader)
     } else {
-        info!("MISC body {}", body);
+        // info!("MISC body {}", body);
         Ok(body)
     }
 }

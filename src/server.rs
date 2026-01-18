@@ -306,7 +306,7 @@ impl LanguageServer for DiffLsp {
     async fn hover(&self, params: HoverParams) -> LspResult<Option<Hover>> {
         info!(
             "Doing hover: {:?}-{:?}",
-            params.text_document_position_params.position.line,
+            params.text_document_position_params.position.line - 1,
             params.text_document_position_params.position.character
         );
         let source_map_res = self
@@ -339,7 +339,14 @@ impl LanguageServer for DiffLsp {
             .text_document_position_params
             .text_document
             .uri = uri;
+
         mapped_params.text_document_position_params.position.line = source_map.source_line.0.into();
+        // I'm seeing the right line of my source map when I do actions
+        // but without this my hover on the 2nd line of a diff will give
+        // the first line, etc.
+        // I think there's a + 1 somewhere internally in the LSP servers?
+        mapped_params.text_document_position_params.position.line  -= 1;
+
 
         if source_map.source_line_type != LineType::Unmodified {
             // this is a problem for 1 letter variables since emacs won't send the hover request
@@ -353,7 +360,7 @@ impl LanguageServer for DiffLsp {
 
         // info!("Hover mapped params: {:?}", mapped_params);
         let hov_res = backend.hover(mapped_params);
-        info!("Hover res: {:?}", hov_res);
+        // info!("Hover res: {:?}", hov_res);
         match hov_res {
             Ok(res) => Ok(res),
             Err(_) => Err(LspError::new(ErrorCode::ServerError(1))), // Translating LspError type
@@ -427,12 +434,10 @@ impl LanguageServer for DiffLsp {
         mapped_params.text_document_position.text_document.uri = uri;
         mapped_params.text_document_position.position.line = source_map.source_line.0.into();
 
-        if source_map.source_line_type != LineType::Unmodified {
-            // this is a problem for 1 letter variables since emacs won't send the hover request
-            // for whitespace, even if it would get mapped to the correct position
-            // Account for the + or - at the start of the line
-            mapped_params.text_document_position.position.character -= 1;
-        }
+        // This is assuming that you're washing the diff with delta and have line numbers on
+        // won't work long term, just testing
+        // TODO: detect if line numbers are on and handle appropriately
+        mapped_params.text_document_position.position.character -= 9;
 
         let references_result = backend.references(&mapped_params);
         match references_result {
