@@ -95,7 +95,7 @@ async fn main() {
     };
 
     info!("hurr");
-    // fetch_origin_nonblocking(&cwd);
+    fetch_origin_nonblocking(&cwd);
     info!("Starting to create backends");
     let backends = match create_backends_map(langs, &cwd) {
         Ok(b) => b,
