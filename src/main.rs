@@ -67,14 +67,45 @@ pub fn initialize_logger() -> Result<(), SetLoggerError> {
 
 #[tokio::main]
 async fn main() {
-    let _ = initialize_logger().unwrap();
+    if let Err(e) = initialize_logger() {
+        eprintln!("Failed to initialize logger: {}", e);
+        return;
+    }
     let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
 
-    let tempfile_path = get_most_recent_file("/tmp", "diff_lsp_").unwrap().unwrap();
+    let tempfile_path = match get_most_recent_file("/tmp", "diff_lsp_") {
+        Ok(Some(path)) => path,
+        Ok(None) => {
+            eprintln!("No initialization tempfile found in /tmp/diff_lsp_*");
+            return;
+        }
+        Err(e) => {
+            eprintln!("Error searching for tempfile: {}", e);
+            return;
+        }
+    };
+
     info!("Looking at tempfile: {:?}", tempfile_path);
-    let (cwd, langs) = read_initialization_params_from_tempfile(&tempfile_path).unwrap();
+    let (cwd, langs) = match read_initialization_params_from_tempfile(&tempfile_path) {
+        Ok(res) => res,
+        Err(e) => {
+            eprintln!("Failed to read initialization params from {:?}: {}", tempfile_path, e);
+            return;
+        }
+    };
+
+    info!("hurr");
     fetch_origin_nonblocking(&cwd);
-    let backends = create_backends_map(langs, &cwd);
+    info!("Starting to create backends");
+    let backends = match create_backends_map(langs, &cwd) {
+        Ok(b) => b,
+        Err(e) => {
+            info!("Errored on starting backends map: {:?}", e);
+            eprintln!("Failed to create backends for directory {}: {}", cwd, e);
+            return;
+        }
+    };
+    info!("Done create backends");
     let (diff_lsp_service, socket) =
         LspService::new(|client| DiffLsp::new(client, backends, cwd.to_string()));
 

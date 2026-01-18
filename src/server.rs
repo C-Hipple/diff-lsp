@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::read_to_string;
 use strum::IntoEnumIterator;
 
+use expanduser::expanduser;
 use log::info;
 use std::collections::HashMap;
 use std::fs;
@@ -52,23 +53,25 @@ impl Notification for CustomNotification {
 pub fn create_backends_map(
     active_langs: Vec<SupportedFileType>,
     dir: &str,
-) -> HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>> {
+) -> Result<HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>>> {
     let mut backends: HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>> =
         HashMap::new();
 
     for supported_lang in SupportedFileType::iter() {
         if active_langs.contains(&supported_lang) {
             let (command, args) = get_lsp_for_file_type(supported_lang);
-            info!("Starting client for server: {:?}", command);
+            info!("Starting client for server: {:?} in dir {:?}", command, dir);
             backends.insert(
                 supported_lang,
                 Arc::new(Mutex::new(client::ClientForBackendServer::new(
-                    command, args, dir,
-                ))),
+                    command,
+                    args,
+                    dir,
+                )?)),
             );
         }
     }
-    backends
+    Ok(backends)
 }
 
 pub fn read_initialization_params_from_tempfile(
@@ -79,6 +82,8 @@ pub fn read_initialization_params_from_tempfile(
         let mut file_types: Vec<SupportedFileType> = vec![];
         let root_regex = Regex::new(r"^Root:\s(.*)").unwrap();
         let file_regex = Regex::new(r"^(modified|new file|deleted)\s+(.*)").unwrap();
+        let diff_git_regex = Regex::new(r"^diff --git\s+(.*)").unwrap();
+
         for line in input.lines() {
             if let Some(caps) = root_regex.captures(line) {
                 cwd = caps.get(1).unwrap().as_str().to_string();
@@ -90,9 +95,26 @@ pub fn read_initialization_params_from_tempfile(
                 if let Some(file_type) = SupportedFileType::from_filename(filename) {
                     file_types.push(file_type);
                 }
+            } else if let Some(caps) = diff_git_regex.captures(line) {
+                // Handle diff --git a/foo.rs b/foo.rs
+                // We want the last one, and strip b/
+                let files_part = caps.get(1).unwrap().as_str();
+                let last_file = files_part.split_whitespace().last().unwrap_or("");
+                let filename = if last_file.starts_with("b/") || last_file.starts_with("a/") {
+                    last_file[2..].to_string()
+                } else {
+                    last_file.to_string()
+                };
+                if let Some(file_type) = SupportedFileType::from_filename(filename) {
+                    file_types.push(file_type);
+                }
             }
         }
-        Ok((cwd, get_unique_elements(&file_types)))
+        let expanded_cwd = expanduser(cwd)?
+            .into_os_string()
+            .into_string()
+            .map_err(|_| anyhow!("Failed to convert path to string"))?;
+        Ok((expanded_cwd, get_unique_elements(&file_types)))
     } else {
         return Err(anyhow!("Unable to read input tempfile"));
     }
@@ -284,8 +306,8 @@ impl LanguageServer for DiffLsp {
     async fn hover(&self, params: HoverParams) -> LspResult<Option<Hover>> {
         info!(
             "Doing hover: {:?}-{:?}",
-            params.text_document_position_params.position.line,
-            params.text_document_position_params.position.character
+            params.text_document_position_params.position.line - 1,
+            params.text_document_position_params.position.character,
         );
         let source_map_res = self
             .get_source_map(params.text_document_position_params.clone())
@@ -317,21 +339,18 @@ impl LanguageServer for DiffLsp {
             .text_document_position_params
             .text_document
             .uri = uri;
-        mapped_params.text_document_position_params.position.line = source_map.source_line.0.into();
 
-        if source_map.source_line_type != LineType::Unmodified {
-            // this is a problem for 1 letter variables since emacs won't send the hover request
-            // for whitespace, even if it would get mapped to the correct position
-            // Account for the + or - at the start of the line
-            mapped_params
-                .text_document_position_params
-                .position
-                .character -= 1
-        }
+        mapped_params.text_document_position_params.position.line = source_map.source_line.0.into();
+        // I'm seeing the right line of my source map when I do actions
+        // but without this my hover on the 2nd line of a diff will give
+        // the first line, etc.
+        // I think there's a + 1 somewhere internally in the LSP servers?
+        mapped_params.text_document_position_params.position.line -= 1;
+
 
         // info!("Hover mapped params: {:?}", mapped_params);
         let hov_res = backend.hover(mapped_params);
-        info!("Hover res: {:?}", hov_res);
+        // info!("Hover res: {:?}", hov_res);
         match hov_res {
             Ok(res) => Ok(res),
             Err(_) => Err(LspError::new(ErrorCode::ServerError(1))), // Translating LspError type
@@ -405,12 +424,9 @@ impl LanguageServer for DiffLsp {
         mapped_params.text_document_position.text_document.uri = uri;
         mapped_params.text_document_position.position.line = source_map.source_line.0.into();
 
-        if source_map.source_line_type != LineType::Unmodified {
-            // this is a problem for 1 letter variables since emacs won't send the hover request
-            // for whitespace, even if it would get mapped to the correct position
-            // Account for the + or - at the start of the line
-            mapped_params.text_document_position.position.character -= 1;
-        }
+        // Same as for hover
+        mapped_params.text_document_position.position.line -= 1;
+
 
         let references_result = backend.references(&mapped_params);
         match references_result {
@@ -445,15 +461,8 @@ impl LanguageServer for DiffLsp {
             .uri = uri;
         mapped_params.text_document_position_params.position.line = source_map.source_line.0.into();
 
-        if source_map.source_line_type != LineType::Unmodified {
-            // this is a problem for 1 letter variables since emacs won't send the hover request
-            // for whitespace, even if it would get mapped to the correct position
-            // Account for the + or - at the start of the line
-            mapped_params
-                .text_document_position_params
-                .position
-                .character -= 1;
-        }
+        // same as for hover
+        mapped_params.text_document_position_params.position.line -= 1;
         let goto_def_res = backend.goto_definition(&mapped_params);
         match goto_def_res {
             Ok(res) => Ok(res),
@@ -487,15 +496,9 @@ impl LanguageServer for DiffLsp {
             .uri = uri;
         mapped_params.text_document_position_params.position.line = source_map.source_line.0.into();
 
-        if source_map.source_line_type != LineType::Unmodified {
-            // this is a problem for 1 letter variables since emacs won't send the hover request
-            // for whitespace, even if it would get mapped to the correct position
-            // Account for the + or - at the start of the line
-            mapped_params
-                .text_document_position_params
-                .position
-                .character -= 1;
-        }
+        // same as for hover
+        mapped_params.text_document_position_params.position.line -= 1;
+
         let goto_type_def_res = backend.goto_type_definition(&mapped_params);
         match goto_type_def_res {
             Ok(res) => Ok(res),
