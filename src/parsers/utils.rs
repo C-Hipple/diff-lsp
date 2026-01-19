@@ -22,7 +22,18 @@ impl LineType {
             // is 1 of these and it's unmodified
             Some('+') => LineType::Added,
             Some('-') => LineType::Removed,
-            _ => LineType::Unmodified,
+            _ => {
+                // support delta wash
+                // 70 ⋮    │-     let _ = initialize_logger().unwrap();
+                // parses as unmodified
+                if line.contains("│-") {
+                    LineType::Removed
+                } else if line.contains("│+") {
+                    LineType::Added
+                } else {
+                    LineType::Unmodified
+                }
+            }
         }
     }
 }
@@ -155,5 +166,6 @@ pub fn is_file_header(line: &str) -> bool {
     // Handle variable whitespace - new code-review-server format uses more spaces
     return line.starts_with("modified ")
         || line.starts_with("new file ")
-        || line.starts_with("deleted ");
+        || line.starts_with("deleted ")
+        || line.starts_with("diff --git ");
 }

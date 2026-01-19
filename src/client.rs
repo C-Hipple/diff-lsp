@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use expanduser::expanduser;
 use log::info;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
@@ -16,7 +17,6 @@ use tower_lsp::lsp_types::*;
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use tower_lsp::jsonrpc::*;
 
 const HEADER_CONTENT_LENGTH: &str = "content-length";
 const HEADER_CONTENT_TYPE: &str = "content-type";
@@ -35,8 +35,9 @@ fn start_server(command: String, args: Option<String>, dir: &str) -> Result<Chil
     if let Some(args_val) = args {
         process.args(args_val.split_whitespace());
     }
+    let expanded_dir = expanduser(dir)?;
     let child = process
-        .current_dir(canonicalize(dir).unwrap())
+        .current_dir(canonicalize(expanded_dir)?)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -44,18 +45,18 @@ fn start_server(command: String, args: Option<String>, dir: &str) -> Result<Chil
 
     match child {
         Ok(c) => Ok(c),
-        Err(_) => Err(Error::new(ErrorCode::ServerError(1)).into()),
+        Err(_) => Err(anyhow!("Failed to spawn local LSP server: {}", command)),
     }
 }
 
 impl ClientForBackendServer {
-    pub fn new(command: String, args: Option<String>, directory: &str) -> Self {
-        ClientForBackendServer {
+    pub fn new(command: String, args: Option<String>, directory: &str) -> Result<Self> {
+        Ok(ClientForBackendServer {
             lsp_command: command.clone(),
-            process: start_server(command.clone(), args, directory).unwrap(),
-            path: Some(canonicalize(directory).unwrap()),
+            process: start_server(command.clone(), args, directory)?,
+            path: Some(canonicalize(directory)?),
             request_id: 1,
-        }
+        })
     }
 
     fn get_request_id(&mut self) -> i32 {
@@ -385,7 +386,7 @@ pub fn read_message<T: BufRead>(reader: &mut T) -> Result<String> {
         info!("{}", body);
         read_message(reader)
     } else {
-        info!("MISC body {}", body);
+        // info!("MISC body {}", body);
         Ok(body)
     }
 }
