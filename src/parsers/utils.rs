@@ -26,14 +26,14 @@ impl LineType {
                 // support delta wash
                 // 70 ⋮    │-     let _ = initialize_logger().unwrap();
                 // parses as unmodified
-                if line.contains("|-") {
+                if line.contains("│-") {
                     LineType::Removed
-                } else if line.contains("|+") {
+                } else if line.contains("│+") {
                     LineType::Added
                 } else {
                     LineType::Unmodified
                 }
-            } // _ => LineType::Unmodified,
+            }
         }
     }
 }
