@@ -12,6 +12,10 @@ Allows your editor to use the following lsp capabilities in diffs
 - Jump Definition
 - Find References
 
+![Finding references in code review](docs/source/images/diff-lsp-references.png)
+
+Finding the references for a code-review by calling out to rust-analyzer.
+
 `diff-lsp` follows the standard language-server protocol, so you can configure your clients to use this LSP server.  However, diff-lsp typically works on ephemeral buffers (such as git-status or code reviews), and LSP is a file-based protocol.  This means that for usage in these buffers, some client modifications are required.
 
 See [Documentation](https://diff-lsp.readthedocs.io/en/latest/) for full docs
