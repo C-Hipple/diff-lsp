@@ -17,7 +17,6 @@ use tower_lsp::lsp_types::*;
 use serde::Serialize;
 use serde_json::{json, Value};
 
-
 const HEADER_CONTENT_LENGTH: &str = "content-length";
 const HEADER_CONTENT_TYPE: &str = "content-type";
 

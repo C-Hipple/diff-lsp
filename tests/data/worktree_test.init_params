@@ -1,0 +1,3 @@
+Root: /tmp/test_root
+Worktree: my_worktree
+modified foo.rs

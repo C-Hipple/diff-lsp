@@ -38,3 +38,7 @@ diff-lsp.el can manage diff-lsp for the following modes:
 ## Limitations
 
 Right now I have a limitation where you can't add more clients for backend servers in a single sesion with the LSP, and you have to restart it.  Normally this is not a problem and is trivial to do.  The reason is because of the types with the backends hashmap being not mutable I'd need to put the whole hashmap behind a mutex which gets me into a ton of rust typing headaches.
+
+## Worktree Integration
+
+`diff-lsp` supports an optional `Worktree:` parameter in its initialization tempfile. If provided, `diff-lsp` will attempt to start backend LSP clients in the specified subfolder. This is useful for monorepos or when working in a specific part of a large project. If the worktree subfolder does not exist, it gracefully falls back to the project root.

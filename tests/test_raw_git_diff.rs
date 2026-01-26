@@ -1,5 +1,5 @@
 use diff_lsp::parsers::code_review::CodeReviewDiff;
-use diff_lsp::parsers::utils::{DiffHeader, Parsable, ParsedDiff};
+use diff_lsp::parsers::utils::{DiffHeader, Parsable};
 use std::fs;
 
 #[test]
