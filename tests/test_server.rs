@@ -72,7 +72,7 @@ mod tests {
     fn test_get_initialization_params_with_worktree() {
         let path: PathBuf = "tests/data/worktree_test.init_params".into();
         let (cwd, worktree, file_types) = read_initialization_params_from_tempfile(&path).unwrap();
-        
+
         assert!(cwd.ends_with("/tmp/test_root"));
         assert_eq!(Some("my_worktree".to_string()), worktree);
         assert_eq!(file_types, vec![SupportedFileType::Rust]);
@@ -103,7 +103,8 @@ mod tests {
             Some(&"diff-lsp".to_string())
         );
 
-        let backends = create_backends_map(vec![SupportedFileType::Rust], &root).expect("failed to create backends");
+        let backends = create_backends_map(vec![SupportedFileType::Rust], &root)
+            .expect("failed to create backends");
         let (service, _socket) =
             // TODO: This no longer sets the diff to RAW_MAGIT_DIFF_RUST
             LspService::new(|client| DiffLsp::new(client, backends, root));
@@ -147,7 +148,8 @@ mod tests {
             diff.headers.get(&DiffHeader::Buffer),
             Some(&"lsp-example".to_string())
         );
-        let backends = create_backends_map(vec![SupportedFileType::Go], &root).expect("failed to create backends");
+        let backends = create_backends_map(vec![SupportedFileType::Go], &root)
+            .expect("failed to create backends");
         let (service, _socket) =
             // TODO: This no longer sets the diff to raw go diff
             LspService::new(|client| DiffLsp::new(client, backends, root));

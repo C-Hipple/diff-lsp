@@ -64,9 +64,7 @@ pub fn create_backends_map(
             backends.insert(
                 supported_lang,
                 Arc::new(Mutex::new(client::ClientForBackendServer::new(
-                    command,
-                    args,
-                    dir,
+                    command, args, dir,
                 )?)),
             );
         }
@@ -119,11 +117,7 @@ pub fn read_initialization_params_from_tempfile(
             .into_os_string()
             .into_string()
             .map_err(|_| anyhow!("Failed to convert path to string"))?;
-        Ok((
-            expanded_cwd,
-            worktree,
-            get_unique_elements(&file_types),
-        ))
+        Ok((expanded_cwd, worktree, get_unique_elements(&file_types)))
     } else {
         return Err(anyhow!("Unable to read input tempfile"));
     }
@@ -356,7 +350,6 @@ impl LanguageServer for DiffLsp {
         // I think there's a + 1 somewhere internally in the LSP servers?
         mapped_params.text_document_position_params.position.line -= 1;
 
-
         // info!("Hover mapped params: {:?}", mapped_params);
         let hov_res = backend.hover(mapped_params);
         // info!("Hover res: {:?}", hov_res);
@@ -435,7 +428,6 @@ impl LanguageServer for DiffLsp {
 
         // Same as for hover
         mapped_params.text_document_position.position.line -= 1;
-
 
         let references_result = backend.references(&mapped_params);
         match references_result {

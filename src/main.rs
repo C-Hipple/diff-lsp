@@ -109,7 +109,10 @@ async fn main() {
                 backend_root = path_str;
             }
         } else {
-            info!("Worktree {:?} does not exist, falling back to root", wt_path);
+            info!(
+                "Worktree {:?} does not exist, falling back to root",
+                wt_path
+            );
         }
     }
 
@@ -118,14 +121,16 @@ async fn main() {
         Ok(b) => b,
         Err(e) => {
             info!("Errored on starting backends map: {:?}", e);
-            eprintln!("Failed to create backends for directory {}: {}", backend_root, e);
+            eprintln!(
+                "Failed to create backends for directory {}: {}",
+                backend_root, e
+            );
             return;
         }
     };
     info!("Done create backends");
-    let (diff_lsp_service, socket) = LspService::new(|client| {
-        DiffLsp::new(client, backends, backend_root.to_string())
-    });
+    let (diff_lsp_service, socket) =
+        LspService::new(|client| DiffLsp::new(client, backends, backend_root.to_string()));
 
     info!("Starting server@{:?}", backend_root);
 
