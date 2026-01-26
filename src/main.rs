@@ -86,30 +86,48 @@ async fn main() {
     };
 
     info!("Looking at tempfile: {:?}", tempfile_path);
-    let (cwd, langs) = match read_initialization_params_from_tempfile(&tempfile_path) {
+    let (cwd, worktree, langs) = match read_initialization_params_from_tempfile(&tempfile_path) {
         Ok(res) => res,
         Err(e) => {
-            eprintln!("Failed to read initialization params from {:?}: {}", tempfile_path, e);
+            eprintln!(
+                "Failed to read initialization params from {:?}: {}",
+                tempfile_path, e
+            );
             return;
         }
     };
 
     info!("hurr");
     fetch_origin_nonblocking(&cwd);
+
+    let mut backend_root = cwd.clone();
+    if let Some(wt) = worktree {
+        let wt_path = std::path::Path::new(&cwd).join(&wt);
+        if wt_path.exists() {
+            info!("Using worktree at {:?}", wt_path);
+            if let Ok(path_str) = wt_path.into_os_string().into_string() {
+                backend_root = path_str;
+            }
+        } else {
+            info!("Worktree {:?} does not exist, falling back to root", wt_path);
+        }
+    }
+
     info!("Starting to create backends");
-    let backends = match create_backends_map(langs, &cwd) {
+    let backends = match create_backends_map(langs, &backend_root) {
         Ok(b) => b,
         Err(e) => {
             info!("Errored on starting backends map: {:?}", e);
-            eprintln!("Failed to create backends for directory {}: {}", cwd, e);
+            eprintln!("Failed to create backends for directory {}: {}", backend_root, e);
             return;
         }
     };
     info!("Done create backends");
-    let (diff_lsp_service, socket) =
-        LspService::new(|client| DiffLsp::new(client, backends, cwd.to_string()));
+    let (diff_lsp_service, socket) = LspService::new(|client| {
+        DiffLsp::new(client, backends, backend_root.to_string())
+    });
 
-    info!("Starting server@{:?}", cwd);
+    info!("Starting server@{:?}", backend_root);
 
     Server::new(stdin, stdout, socket)
         .serve(diff_lsp_service)

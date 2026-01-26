@@ -76,11 +76,13 @@ pub fn create_backends_map(
 
 pub fn read_initialization_params_from_tempfile(
     file_path: &PathBuf,
-) -> Result<(String, Vec<SupportedFileType>)> {
+) -> Result<(String, Option<String>, Vec<SupportedFileType>)> {
     if let Ok(input) = read_to_string(file_path) {
         let mut cwd = String::new();
+        let mut worktree: Option<String> = None;
         let mut file_types: Vec<SupportedFileType> = vec![];
         let root_regex = Regex::new(r"^Root:\s(.*)").unwrap();
+        let worktree_regex = Regex::new(r"^Worktree:\s(.*)").unwrap();
         let file_regex = Regex::new(r"^(modified|new file|deleted)\s+(.*)").unwrap();
         let diff_git_regex = Regex::new(r"^diff --git\s+(.*)").unwrap();
 
@@ -88,6 +90,9 @@ pub fn read_initialization_params_from_tempfile(
             if let Some(caps) = root_regex.captures(line) {
                 cwd = caps.get(1).unwrap().as_str().to_string();
                 // break;
+            }
+            if let Some(caps) = worktree_regex.captures(line) {
+                worktree = Some(caps.get(1).unwrap().as_str().to_string());
             }
             if let Some(caps) = file_regex.captures(line) {
                 println!("caps: {:?}", caps.len());
@@ -114,7 +119,11 @@ pub fn read_initialization_params_from_tempfile(
             .into_os_string()
             .into_string()
             .map_err(|_| anyhow!("Failed to convert path to string"))?;
-        Ok((expanded_cwd, get_unique_elements(&file_types)))
+        Ok((
+            expanded_cwd,
+            worktree,
+            get_unique_elements(&file_types),
+        ))
     } else {
         return Err(anyhow!("Unable to read input tempfile"));
     }

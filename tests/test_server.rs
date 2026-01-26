@@ -61,10 +61,21 @@ mod tests {
     #[test]
     fn test_get_initialization_params() {
         let path: PathBuf = "tests/data/full_go_diff.code_review".into();
-        let (cwd, file_types) = read_initialization_params_from_tempfile(&path).unwrap();
+        let (cwd, worktree, file_types) = read_initialization_params_from_tempfile(&path).unwrap();
         println!("types: {:?}", file_types);
         assert_eq!("/home/chris/gtdbot/".to_string(), cwd);
+        assert!(worktree.is_none());
         assert_eq!(file_types, vec![SupportedFileType::Go])
+    }
+
+    #[test]
+    fn test_get_initialization_params_with_worktree() {
+        let path: PathBuf = "tests/data/worktree_test.init_params".into();
+        let (cwd, worktree, file_types) = read_initialization_params_from_tempfile(&path).unwrap();
+        
+        assert!(cwd.ends_with("/tmp/test_root"));
+        assert_eq!(Some("my_worktree".to_string()), worktree);
+        assert_eq!(file_types, vec![SupportedFileType::Rust]);
     }
 
     #[allow(dead_code)]
