@@ -15,6 +15,12 @@ pub enum SupportedFileType {
     Go,
     Python,
     TypeScript,
+    JavaScript,
+    C,
+    Cpp,
+    Java,
+    Ruby,
+    Haskell,
 }
 
 impl SupportedFileType {
@@ -24,6 +30,12 @@ impl SupportedFileType {
             "go" => Some(SupportedFileType::Go),
             "py" => Some(SupportedFileType::Python),
             "ts" | "tsx" => Some(SupportedFileType::TypeScript),
+            "js" | "jsx" | "mjs" | "cjs" => Some(SupportedFileType::JavaScript),
+            "c" | "h" => Some(SupportedFileType::C),
+            "cpp" | "cc" | "cxx" | "hpp" | "hxx" | "hh" => Some(SupportedFileType::Cpp),
+            "java" => Some(SupportedFileType::Java),
+            "rb" => Some(SupportedFileType::Ruby),
+            "hs" | "lhs" => Some(SupportedFileType::Haskell),
             _ => None,
         }
     }
@@ -46,6 +58,18 @@ pub fn get_lsp_for_file_type(file_type: SupportedFileType) -> (String, Option<St
         SupportedFileType::TypeScript => (
             "typescript-language-server".to_string(),
             Some("--stdio".to_string()),
+        ),
+        SupportedFileType::JavaScript => (
+            "typescript-language-server".to_string(),
+            Some("--stdio".to_string()),
+        ),
+        SupportedFileType::C => ("clangd".to_string(), None),
+        SupportedFileType::Cpp => ("clangd".to_string(), None),
+        SupportedFileType::Java => ("jdtls".to_string(), None),
+        SupportedFileType::Ruby => ("solargraph".to_string(), Some("stdio".to_string())),
+        SupportedFileType::Haskell => (
+            "haskell-language-server-wrapper".to_string(),
+            Some("--lsp".to_string()),
         ),
     }
 }
