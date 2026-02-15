@@ -67,7 +67,10 @@ pub fn get_lsp_for_file_type(file_type: SupportedFileType) -> (String, Option<St
         SupportedFileType::Cpp => ("clangd".to_string(), None),
         SupportedFileType::Java => ("jdtls".to_string(), None),
         SupportedFileType::Ruby => ("solargraph".to_string(), Some("stdio".to_string())),
-        SupportedFileType::Haskell => ("haskell-language-server-wrapper".to_string(), Some("--lsp".to_string())),
+        SupportedFileType::Haskell => (
+            "haskell-language-server-wrapper".to_string(),
+            Some("--lsp".to_string()),
+        ),
     }
 }
 
