@@ -78,6 +78,33 @@ mod tests {
         assert_eq!(file_types, vec![SupportedFileType::Rust]);
     }
 
+    #[test]
+    fn test_get_initialization_params_with_tab_padded_worktree() {
+        // The emacs client tab-aligns header values, so the worktree line
+        // arrives as "Worktree: \t/abs/path".
+        let path: PathBuf = "tests/data/worktree_tab.init_params".into();
+        let (cwd, worktree, file_types) = read_initialization_params_from_tempfile(&path).unwrap();
+
+        assert!(cwd.ends_with("/tmp/test_root"));
+        assert_eq!(
+            Some("/tmp/test_root_worktrees/7_feature".to_string()),
+            worktree
+        );
+        assert_eq!(file_types, vec![SupportedFileType::Rust]);
+    }
+
+    #[test]
+    fn test_get_initialization_params_ignores_placeholder_worktree() {
+        // The bun client used to serialize a missing worktree as "undefined";
+        // empty or placeholder values must not be treated as a worktree.
+        let path: PathBuf = "tests/data/worktree_undefined.init_params".into();
+        let (cwd, worktree, file_types) = read_initialization_params_from_tempfile(&path).unwrap();
+
+        assert!(cwd.ends_with("/tmp/test_root"));
+        assert!(worktree.is_none());
+        assert_eq!(file_types, vec![SupportedFileType::Rust]);
+    }
+
     #[allow(dead_code)]
     pub fn get_open_params_go(uri: Url) -> tower_lsp::lsp_types::DidOpenTextDocumentParams {
         DidOpenTextDocumentParams {

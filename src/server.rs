@@ -79,18 +79,25 @@ pub fn read_initialization_params_from_tempfile(
         let mut cwd = String::new();
         let mut worktree: Option<String> = None;
         let mut file_types: Vec<SupportedFileType> = vec![];
-        let root_regex = Regex::new(r"^Root:\s(.*)").unwrap();
-        let worktree_regex = Regex::new(r"^Worktree:\s(.*)").unwrap();
+        // Values may be padded with extra whitespace (the emacs client
+        // tab-aligns header values), so match any run of whitespace and trim.
+        let root_regex = Regex::new(r"^Root:\s+(.*)").unwrap();
+        let worktree_regex = Regex::new(r"^Worktree:\s+(.*)").unwrap();
         let file_regex = Regex::new(r"^(modified|new file|deleted)\s+(.*)").unwrap();
         let diff_git_regex = Regex::new(r"^diff --git\s+(.*)").unwrap();
 
         for line in input.lines() {
             if let Some(caps) = root_regex.captures(line) {
-                cwd = caps.get(1).unwrap().as_str().to_string();
+                cwd = caps.get(1).unwrap().as_str().trim().to_string();
                 // break;
             }
             if let Some(caps) = worktree_regex.captures(line) {
-                worktree = Some(caps.get(1).unwrap().as_str().to_string());
+                let value = caps.get(1).unwrap().as_str().trim();
+                // Clients may emit the header with no value (or a serialized
+                // JS null) when no worktree exists for the review.
+                if !value.is_empty() && value != "undefined" && value != "null" {
+                    worktree = Some(value.to_string());
+                }
             }
             if let Some(caps) = file_regex.captures(line) {
                 println!("caps: {:?}", caps.len());

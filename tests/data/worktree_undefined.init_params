@@ -1,0 +1,6 @@
+Project: PR 9
+Root: /tmp/test_root
+Worktree: undefined
+Buffer: PR #9
+Type: code-review
+modified foo.rs
