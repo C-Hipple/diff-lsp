@@ -73,16 +73,29 @@ async fn main() {
     }
     let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
 
-    let tempfile_path = match get_most_recent_file("/tmp", "diff_lsp_") {
-        Ok(Some(path)) => path,
-        Ok(None) => {
-            eprintln!("No initialization tempfile found in /tmp/diff_lsp_*");
-            return;
+    // An explicit tempfile path may be passed as the first argument so a
+    // client can pin the init params it just wrote instead of racing other
+    // sessions for the most recently modified /tmp/diff_lsp_* file.
+    let tempfile_path = match std::env::args().nth(1) {
+        Some(arg) => {
+            let path = PathBuf::from(&arg);
+            if !path.is_file() {
+                eprintln!("Initialization tempfile {:?} does not exist", path);
+                return;
+            }
+            path
         }
-        Err(e) => {
-            eprintln!("Error searching for tempfile: {}", e);
-            return;
-        }
+        None => match get_most_recent_file("/tmp", "diff_lsp_") {
+            Ok(Some(path)) => path,
+            Ok(None) => {
+                eprintln!("No initialization tempfile found in /tmp/diff_lsp_*");
+                return;
+            }
+            Err(e) => {
+                eprintln!("Error searching for tempfile: {}", e);
+                return;
+            }
+        },
     };
 
     info!("Looking at tempfile: {:?}", tempfile_path);
@@ -102,8 +115,16 @@ async fn main() {
 
     let mut backend_root = cwd.clone();
     if let Some(wt) = worktree {
-        let wt_path = std::path::Path::new(&cwd).join(&wt);
-        if wt_path.exists() {
+        // The worktree header is usually an absolute path (the
+        // code-review-server writes one), but expand ~ and resolve
+        // relative values against the root for other clients.
+        let expanded_wt = expanduser(&wt).unwrap_or_else(|_| PathBuf::from(&wt));
+        let wt_path = if expanded_wt.is_absolute() {
+            expanded_wt
+        } else {
+            std::path::Path::new(&cwd).join(&expanded_wt)
+        };
+        if wt_path.is_dir() {
             info!("Using worktree at {:?}", wt_path);
             if let Ok(path_str) = wt_path.into_os_string().into_string() {
                 backend_root = path_str;

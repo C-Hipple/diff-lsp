@@ -1,0 +1,7 @@
+Project: review buffer
+Root: /tmp/test_root
+Buffer: code-review-server
+Type: my-code-review
+Title: #7: some pr
+Worktree: 	/tmp/test_root_worktrees/7_feature
+modified foo.rs
