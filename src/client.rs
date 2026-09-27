@@ -10,7 +10,7 @@ use std::{
     fs::canonicalize,
     //thread::{spawn},
     //path::{PathBuf}, io::Read,
-    process::{Child, Command, Stdio},
+    process::{Child, ChildStdout, Command, Stdio},
 };
 use tower_lsp::lsp_types::*;
 
@@ -24,6 +24,9 @@ const HEADER_CONTENT_TYPE: &str = "content-type";
 pub struct ClientForBackendServer {
     pub lsp_command: String,
     process: Child,
+    // One reader for the life of the process: a BufReader reads ahead, and a
+    // fresh one per request dropped whatever the last one had buffered.
+    stdout: BufReader<ChildStdout>,
     #[allow(dead_code)]
     path: Option<PathBuf>,
     request_id: i32,
@@ -50,9 +53,15 @@ fn start_server(command: String, args: Option<String>, dir: &str) -> Result<Chil
 
 impl ClientForBackendServer {
     pub fn new(command: String, args: Option<String>, directory: &str) -> Result<Self> {
+        let mut process = start_server(command.clone(), args, directory)?;
+        let stdout = process
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow!("No stdout for {}", command))?;
         Ok(ClientForBackendServer {
             lsp_command: command.clone(),
-            process: start_server(command.clone(), args, directory)?,
+            process,
+            stdout: BufReader::new(stdout),
             path: Some(canonicalize(directory)?),
             request_id: 1,
         })
@@ -166,18 +175,11 @@ impl ClientForBackendServer {
                 "params": &val,
             });
         }
-        let full_binding = serde_json::to_string(&full_body).unwrap();
-        let msg = format!(
-            "Content-Length: {}\r\n\r\n{}",
-            full_binding.len(),
-            full_binding
-        );
         if method.contains("ized") {
-            println!("msg: {}", msg);
+            println!("msg: {}", full_body);
         }
 
-        let _ = std_in.write_all(msg.as_bytes());
-        let _ = std_in.flush();
+        let _ = write_message(std_in, &full_body);
 
         if !check_response {
             // // was testing if maybe there was other error output
@@ -189,21 +191,10 @@ impl ClientForBackendServer {
             return Ok("".to_string());
         }
 
-        let std_out = self.process.stdout.as_mut().unwrap();
-        let mut stdout_reader = BufReader::new(std_out);
-        // let mut stdout_reader = BufReader::new(std_out);
-        //let mut stdout_reader = TimeoutReader::new(std_out, Duration::new(2, 0));
-
-        let resp = read_message(&mut stdout_reader);
+        let resp = read_response(&mut self.stdout, std_in, id);
         match resp {
             Ok(r) => {
                 println!("Okay! {:?}", r);
-                if r.contains("registerCapability") {
-                    println!("Got a register response");
-                    if let Ok(r) = read_message(&mut stdout_reader) {
-                        return Ok(r);
-                    }
-                }
                 Ok(r)
             }
             Err(e) => {
@@ -311,9 +302,7 @@ impl ClientForBackendServer {
     }
 
     pub fn check_messages(&mut self) {
-        let std_out = self.process.stdout.as_mut().unwrap();
-        let mut stdout_reader = BufReader::new(std_out);
-        let resp = read_message(&mut stdout_reader);
+        let resp = read_message(&mut self.stdout);
         match resp {
             Ok(r) => {
                 info!("{}", r)
@@ -377,15 +366,50 @@ pub fn read_message<T: BufRead>(reader: &mut T) -> Result<String> {
     reader.read_exact(&mut body_buffer)?;
 
     let body = String::from_utf8(body_buffer)?;
-    // we don't want this for now
-    if body.contains("showMessage")
-        || body.contains("logMessage")
-        || body.contains("publishDiagnostics")
-    {
-        info!("{}", body);
-        read_message(reader)
-    } else {
-        // info!("MISC body {}", body);
-        Ok(body)
+    Ok(body)
+}
+
+fn write_message<W: Write>(writer: &mut W, body: &Value) -> Result<()> {
+    let body = serde_json::to_string(body)?;
+    write!(writer, "Content-Length: {}\r\n\r\n{}", body.len(), body)?;
+    writer.flush()?;
+    Ok(())
+}
+
+/// Reads a backend's messages until the answer to request `id`, and returns
+/// it. Whatever a server writes in between is not that answer:
+/// notifications (logs, diagnostics, progress, tsserver's
+/// $/typescriptVersion) are skipped, and the server's own requests to the
+/// client get a null result so it isn't left waiting on one. Taking the first
+/// message as the answer, as this used to, shifted every later answer onto
+/// the wrong request.
+pub fn read_response<R: BufRead, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    id: i32,
+) -> Result<String> {
+    loop {
+        let body = read_message(reader)?;
+        let msg: Value = match serde_json::from_str(&body) {
+            Ok(msg) => msg,
+            Err(_) => {
+                info!("Skipping unparseable message from backend: {}", body);
+                continue;
+            }
+        };
+        match (msg.get("method"), msg.get("id")) {
+            (Some(method), Some(request_id)) => {
+                info!("Answering backend request {} with null", method);
+                write_message(
+                    writer,
+                    &json!({"jsonrpc": "2.0", "id": request_id, "result": null}),
+                )?;
+            }
+            (Some(_), None) => info!("{}", body),
+            (None, Some(response_id)) if response_id.as_i64() == Some(id.into()) => {
+                return Ok(body)
+            }
+            _ => info!("Skipping answer to another request: {}", body),
+        }
     }
 }
