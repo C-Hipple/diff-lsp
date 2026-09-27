@@ -25,6 +25,10 @@ impl Parsable for MagitDiff {
                 lines_map: magit_diff.lines_map,
                 parsed_at: Utc::now(),
                 total_lines: 0,
+                // magit shows the source right after the marker, and its
+                // hunks are often indented throughout, which would read as
+                // code-review-server's "+ " layout.
+                marker_width: 1,
             });
         }
         None

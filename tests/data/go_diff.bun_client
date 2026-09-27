@@ -1,0 +1,27 @@
+Project: demo
+Root: /src/demo
+Worktree: /src/demo_worktrees/7_feature-mul
+Buffer: PR #7
+Type: code-review
+diff --git a/demo.go b/demo.go
+index 1859d41..af0f36c 100644
+--- a/demo.go
++++ b/demo.go
+
+@@ -1,9 +1,15 @@
+  package demo
+  
++ // Mul multiplies.
++ func Mul(a, b int) int {
++ 	return a * b
++ }
++ 
+  func Add(a, b int) int {
+  	return a + b
+  }
+  
+  func Use() int {
+- 	return Add(1, 2)
++ 	x := Add(1, 2)
++ 	return Mul(x, 3)
+  }
