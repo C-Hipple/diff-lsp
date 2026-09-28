@@ -350,12 +350,10 @@ impl LanguageServer for DiffLsp {
             .text_document
             .uri = uri;
 
-        mapped_params.text_document_position_params.position.line = source_map.source_line.0.into();
-        // I'm seeing the right line of my source map when I do actions
-        // but without this my hover on the 2nd line of a diff will give
-        // the first line, etc.
-        // I think there's a + 1 somewhere internally in the LSP servers?
-        mapped_params.text_document_position_params.position.line -= 1;
+        // The source map's lines are 1-indexed; the client's column counts the
+        // diff line's +/- marker.
+        mapped_params.text_document_position_params.position =
+            source_map.source_position(params.text_document_position_params.position);
 
         // info!("Hover mapped params: {:?}", mapped_params);
         let hov_res = backend.hover(mapped_params);
@@ -431,10 +429,9 @@ impl LanguageServer for DiffLsp {
 
         let uri = uri_from_relative_filename(self.root.clone(), &source_map.file_name);
         mapped_params.text_document_position.text_document.uri = uri;
-        mapped_params.text_document_position.position.line = source_map.source_line.0.into();
-
         // Same as for hover
-        mapped_params.text_document_position.position.line -= 1;
+        mapped_params.text_document_position.position =
+            source_map.source_position(mapped_params.text_document_position.position);
 
         let references_result = backend.references(&mapped_params);
         match references_result {
@@ -467,10 +464,9 @@ impl LanguageServer for DiffLsp {
             .text_document_position_params
             .text_document
             .uri = uri;
-        mapped_params.text_document_position_params.position.line = source_map.source_line.0.into();
-
         // same as for hover
-        mapped_params.text_document_position_params.position.line -= 1;
+        mapped_params.text_document_position_params.position =
+            source_map.source_position(_params.text_document_position_params.position);
         let goto_def_res = backend.goto_definition(&mapped_params);
         match goto_def_res {
             Ok(res) => Ok(res),
@@ -502,10 +498,9 @@ impl LanguageServer for DiffLsp {
             .text_document_position_params
             .text_document
             .uri = uri;
-        mapped_params.text_document_position_params.position.line = source_map.source_line.0.into();
-
         // same as for hover
-        mapped_params.text_document_position_params.position.line -= 1;
+        mapped_params.text_document_position_params.position =
+            source_map.source_position(params.text_document_position_params.position);
 
         let goto_type_def_res = backend.goto_type_definition(&mapped_params);
         match goto_type_def_res {

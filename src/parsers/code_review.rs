@@ -23,12 +23,15 @@ pub struct CodeReviewDiff {
 impl Parsable for CodeReviewDiff {
     fn parse(source: &str) -> Option<ParsedDiff> {
         if let Some(cr_diff) = CodeReviewDiff::self_parse(source) {
+            let marker_width =
+                infer_marker_width(cr_diff.lines_map.values().map(|(_, l)| l.line.as_str()));
             return Some(ParsedDiff {
                 headers: cr_diff.headers,
                 filenames: cr_diff.filenames,
                 lines_map: cr_diff.lines_map,
                 parsed_at: Utc::now(),
                 total_lines: cr_diff.total_lines,
+                marker_width,
             });
         }
         None
