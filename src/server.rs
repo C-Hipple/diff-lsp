@@ -23,6 +23,7 @@ use tokio::sync::{Mutex, RwLock};
 
 use crate::client;
 use crate::reverse_map::{DiffLocationMapper, DiffLocationsMode, ReverseIndex};
+use crate::symbols;
 use crate::utils::{fetch_origin_nonblocking, get_unique_elements};
 
 use crate::SupportedFileType;
@@ -442,7 +443,7 @@ impl LanguageServer for DiffLsp {
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
                 type_definition_provider: Some(TypeDefinitionProviderCapability::Simple(true)),
-                // document_symbol_provider: Some(OneOf::Left(true)),
+                document_symbol_provider: Some(OneOf::Left(true)),
                 ..ServerCapabilities::default()
             },
             ..Default::default()
@@ -755,5 +756,44 @@ impl LanguageServer for DiffLsp {
                 Ok(None)
             }
         }
+    }
+
+    async fn document_symbol(
+        &self,
+        params: DocumentSymbolParams,
+    ) -> LspResult<Option<DocumentSymbolResponse>> {
+        let diff = match self.get_diff(&params.text_document.uri).await {
+            Some(diff) => diff,
+            None => return Ok(None),
+        };
+
+        // Fetch backend symbols for every file in the diff we have a backend for.
+        // A failing backend just leaves that file without children.
+        let mut backend_symbols: HashMap<String, DocumentSymbolResponse> = HashMap::new();
+        for filename in diff.filenames.iter().unique() {
+            let Some(file_type) = SupportedFileType::from_filename(filename.clone()) else {
+                continue;
+            };
+            let Some(backend) = self.get_backend(file_type).await else {
+                continue;
+            };
+            let mapped_params = DocumentSymbolParams {
+                text_document: TextDocumentIdentifier {
+                    uri: uri_from_relative_filename(self.root.clone(), filename),
+                },
+                work_done_progress_params: params.work_done_progress_params.clone(),
+                partial_result_params: params.partial_result_params.clone(),
+            };
+            match backend.document_symbol(&mapped_params).await {
+                Ok(Some(response)) => {
+                    backend_symbols.insert(filename.clone(), response);
+                }
+                other => info!("No document symbols for {:?}: {:?}", filename, other),
+            }
+        }
+
+        Ok(Some(DocumentSymbolResponse::Nested(
+            symbols::build_diff_symbols(&diff, &backend_symbols),
+        )))
     }
 }

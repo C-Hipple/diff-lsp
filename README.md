@@ -12,7 +12,7 @@ Allows your editor to use the following lsp capabilities in diffs
 - Jump Definition
 - Find References
 - Jump to type definition
-- Breadcrumb mode.
+- Document symbols (imenu, breadcrumb / headerline)
 
 ![Finding references in code review](docs/source/images/diff-lsp-references.png)
 
@@ -72,3 +72,14 @@ diff-lsp reads its context (`Root:`, optional `Worktree:`, and the diff) from an
 ## Worktree Integration
 
 `diff-lsp` supports an optional `Worktree:` parameter in its initialization tempfile. If provided, `diff-lsp` will attempt to start backend LSP clients in the specified subfolder. This is useful for monorepos or when working in a specific part of a large project. If the worktree subfolder does not exist, it gracefully falls back to the project root.
+
+## Document Symbols (imenu / breadcrumb)
+
+`textDocument/documentSymbol` on a diff buffer returns one top-level symbol (kind `File`) per file in the diff, spanning that file's lines in the buffer.  Underneath it are the symbols the backend LSP reports for the real source file, filtered to the ones that touch a visible (added or unmodified) hunk line and translated into diff-buffer positions.
+
+- A symbol that starts or ends outside the hunk (e.g. a function whose signature isn't in the diff) is clamped to the visible lines; if its name isn't visible, its selection range points at the start of the visible part.
+- Symbols with no visible lines are dropped; nesting (impl > fn, struct > field, ...) is preserved.
+- Files without a running backend (or whose backend fails) still get their top-level entry, so imenu can jump between files.
+- Both hierarchical (`DocumentSymbol[]`) and flat (`SymbolInformation[]`) backend responses are supported; flat responses are nested by range containment.
+
+In Emacs this powers `imenu` and lsp-mode's headerline breadcrumb (`lsp-headerline-breadcrumb-mode`) in magit-status and code-review buffers.
