@@ -27,7 +27,7 @@ use tower_lsp::lsp_types::{
     DocumentSymbol, DocumentSymbolResponse, Position, Range, SymbolInformation, SymbolKind,
 };
 
-use crate::parsers::utils::{DiffHeader, LineType, ParsedDiff};
+use crate::parsers::utils::{LineType, ParsedDiff};
 
 /// A visible (added / unmodified) line of a file inside the diff buffer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,18 +55,6 @@ pub struct FileIndex {
 
 fn utf16_len(s: &str) -> u32 {
     s.encode_utf16().count() as u32
-}
-
-/// Width of the `+`/`-`/` ` marker that precedes the source text on each diff line.
-///
-/// magit and the original code-review package use a single character.  The
-/// code-review-server package (`Type: my-code-review`) renders `"+ "` / `"- "`
-/// / `"  "`, i.e. two characters.
-pub fn prefix_width(diff: &ParsedDiff) -> u32 {
-    match diff.headers.get(&DiffHeader::Type).map(|s| s.trim()) {
-        Some("my-code-review") => 2,
-        _ => 1,
-    }
 }
 
 /// Builds one [`FileIndex`] per file present in `lines_map`, ordered by their
@@ -268,7 +256,7 @@ pub fn build_diff_symbols(
     diff: &ParsedDiff,
     backend_symbols: &HashMap<String, DocumentSymbolResponse>,
 ) -> Vec<DocumentSymbol> {
-    let prefix = prefix_width(diff);
+    let prefix = diff.marker_width;
     build_file_indexes(diff)
         .into_iter()
         .map(|index| {
@@ -434,15 +422,8 @@ modified   src/bar.rs
     }
 
     #[test]
-    fn prefix_width_by_diff_type() {
-        assert_eq!(prefix_width(&diff()), 1);
-        let mut d = diff();
-        d.headers
-            .insert(DiffHeader::Type, "my-code-review".to_string());
-        assert_eq!(prefix_width(&d), 2);
-        d.headers
-            .insert(DiffHeader::Type, "code-review".to_string());
-        assert_eq!(prefix_width(&d), 1);
+    fn magit_diff_uses_one_column_marker() {
+        assert_eq!(diff().marker_width, 1);
     }
 
     #[test]

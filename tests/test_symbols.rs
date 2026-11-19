@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::fs;
 
 use diff_lsp::parsers::utils::{LineType, Parsable, ParsedDiff};
-use diff_lsp::symbols::{build_diff_symbols, build_file_indexes, prefix_width, translate_range};
+use diff_lsp::symbols::{build_diff_symbols, build_file_indexes, translate_range};
 use tower_lsp::lsp_types::{DocumentSymbol, DocumentSymbolResponse, Position, Range, SymbolKind};
 
 fn load(name: &str) -> ParsedDiff {
@@ -54,7 +54,7 @@ fn reverse_index_inverts_forward_mapping_for_all_fixtures() {
 #[test]
 fn code_review_server_config_go_pin() {
     let diff = load("go_diff.code_review_server");
-    assert_eq!(prefix_width(&diff), 2);
+    assert_eq!(diff.marker_width, 2);
     let files = build_file_indexes(&diff);
     let names: Vec<_> = files.iter().map(|f| f.filename.as_str()).collect();
     assert_eq!(names[0], "README.md");
@@ -75,7 +75,7 @@ fn code_review_server_config_go_pin() {
 #[test]
 fn magit_rust_diff_pin() {
     let diff = load("rust_diff.magit_status");
-    assert_eq!(prefix_width(&diff), 1);
+    assert_eq!(diff.marker_width, 1);
     let files = build_file_indexes(&diff);
     let client = files
         .iter()
