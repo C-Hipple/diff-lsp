@@ -182,7 +182,11 @@ fn backend_line_is_zero_based_source_line_is_one_based() {
     assert_eq!(backend_line_to_source_line(0), Some(SourceLineNumber(1)));
     assert_eq!(backend_line_to_source_line(21), Some(SourceLineNumber(22)));
     assert_eq!(backend_line_to_source_line(u32::MAX), None);
-    assert_eq!(backend_line_to_source_line(70_000), None);
+    // Line numbers past u16::MAX are fine.
+    assert_eq!(
+        backend_line_to_source_line(70_000),
+        Some(SourceLineNumber(70_001))
+    );
 }
 
 #[test]
@@ -295,7 +299,7 @@ fn published_line_round_trips_through_hover_mapping() {
     let store = store_with("config.go", vec![diag(backend_line, 1, 13, "x")]);
     let out = map_diagnostics_for_diff(&diff, ROOT, &store, DiagnosticsMode::Added);
 
-    let lsp_line: u16 = out[0].range.start.line.try_into().unwrap();
+    let lsp_line = out[0].range.start.line;
     let sm = diff.map_diff_line_to_src(lsp_line).unwrap();
     assert_eq!(sm.file_name, "config.go");
     assert_eq!(sm.source_line_type, LineType::Added);
@@ -304,7 +308,7 @@ fn published_line_round_trips_through_hover_mapping() {
     let diff = parse_fixture("go_diff.magit_status");
     let store = store_with("main.go", vec![diag(46, 1, 7, "y")]);
     let out = map_diagnostics_for_diff(&diff, ROOT, &store, DiagnosticsMode::Added);
-    let lsp_line: u16 = out[0].range.start.line.try_into().unwrap();
+    let lsp_line = out[0].range.start.line;
     let sm = diff.map_diff_line_to_src(lsp_line).unwrap();
     assert_eq!(sm.file_name, "main.go");
     assert_eq!(sm.source_line.0 as u32 - 1, 46);
@@ -406,7 +410,7 @@ fn root_with_trailing_slash_and_multiple_files() {
 // map_diagnostic: ranges & clamping
 // ---------------------------------------------------------------------------------------
 
-fn added(line: &str, src: u16) -> DiffLine {
+fn added(line: &str, src: u32) -> DiffLine {
     DiffLine {
         line_type: LineType::Added,
         line: line.to_string(),

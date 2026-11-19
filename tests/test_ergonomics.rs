@@ -142,7 +142,7 @@ fn test_most_recent_file_across_dirs() {
 
     let empty = scratch_dir("scan-empty");
     assert_eq!(
-        get_most_recent_file_in_dirs(&[empty.clone()], INIT_FILE_PREFIX),
+        get_most_recent_file_in_dirs(std::slice::from_ref(&empty), INIT_FILE_PREFIX),
         None
     );
 
@@ -193,14 +193,14 @@ async fn test_missing_backend_lazy_start_is_tolerated() {
     // Hover on a mapped line with no backend → Ok(None), not an error.
     let raw = fs::read_to_string(CODE_REVIEW_FIXTURE).unwrap();
     let diff = ParsedDiff::parse(&raw).unwrap();
-    let mapped_line = (0..500u16)
+    let mapped_line = (0..500u32)
         .find(|l| {
             diff.map_diff_line_to_src(*l)
                 .map(|m| m.file_type == SupportedFileType::Go)
                 .unwrap_or(false)
         })
         .expect("fixture has a mapped go line");
-    let res = server.hover(hover_params(mapped_line.into())).await;
+    let res = server.hover(hover_params(mapped_line)).await;
     assert!(matches!(res, Ok(None)));
 
     // Hover on a header line (no source map) → Ok(None).

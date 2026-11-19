@@ -12,7 +12,7 @@
 //! * `ParsedDiff::lines_map` keys (`InputLineNumber`) are the 1-based line
 //!   numbers of the parsed diff text.
 //! * The server looks up `lines_map` using the editor's `position.line`
-//!   *directly* (see `DiffLsp::get_source_map`).  To stay consistent with that
+//!   *directly* (see `DiffLsp::map_position`).  To stay consistent with that
 //!   (so that a location we return can be fed straight back into another
 //!   request and land on the same diff line), the LSP line we emit for an
 //!   `InputLineNumber(n)` is `n`.  This conversion lives in one place:
@@ -76,7 +76,7 @@ impl DiffLocationsMode {
 /// Convert an `InputLineNumber` to the LSP line the editor uses for it.
 /// See the module docs for why this is the identity.
 pub fn input_line_to_lsp_line(input: InputLineNumber) -> u32 {
-    u32::from(input.0)
+    input.0
 }
 
 /// Index of `(relative filename, 1-based source line) -> InputLineNumber` for
@@ -100,7 +100,7 @@ impl ReverseIndex {
             if !matches!(diff_line.line_type, LineType::Added | LineType::Unmodified) {
                 continue;
             }
-            let src = u32::from(diff_line.source_line_number.0);
+            let src = diff_line.source_line_number.0;
             map.entry((normalize_filename(filename), src))
                 .or_insert(*input);
         }
@@ -300,7 +300,7 @@ mod tests {
         }
     }
 
-    fn line(t: LineType, text: &str, src: u16) -> DiffLine {
+    fn line(t: LineType, text: &str, src: u32) -> DiffLine {
         DiffLine {
             line_type: t,
             line: text.to_string(),
@@ -310,9 +310,11 @@ mod tests {
 
     /// Small synthetic diff: two files, two hunks in a.rs, a removed line.
     fn synthetic() -> ParsedDiff {
-        let mut d = ParsedDiff::default();
-        d.marker_width = 1;
-        d.filenames = vec!["src/a.rs".into(), "src/b.rs".into()];
+        let mut d = ParsedDiff {
+            marker_width: 1,
+            filenames: vec!["src/a.rs".into(), "src/b.rs".into()],
+            ..Default::default()
+        };
         let entries = vec![
             (5, "src/a.rs", line(LineType::Unmodified, " fn a() {", 10)),
             (6, "src/a.rs", line(LineType::Removed, "-    old();", 11)),
@@ -582,9 +584,7 @@ mod tests {
             if dl.line_type == LineType::Removed {
                 continue;
             }
-            let found = idx
-                .lookup(filename, u32::from(dl.source_line_number.0))
-                .unwrap();
+            let found = idx.lookup(filename, dl.source_line_number.0).unwrap();
             let (f2, dl2) = &diff.lines_map[&found];
             assert_eq!(f2, filename);
             assert_eq!(dl2.source_line_number, dl.source_line_number);
@@ -618,14 +618,14 @@ mod tests {
             }
             // Skip lines shadowed by an earlier occurrence of the same source
             // line (magit staged + unstaged sections).
-            if idx.lookup(filename, u32::from(dl.source_line_number.0)) != Some(*input) {
+            if idx.lookup(filename, dl.source_line_number.0) != Some(*input) {
                 continue;
             }
             // Only lines of a supported file type reach a backend.
             let Some(src_map) = diff.map_diff_line_to_src(input.0) else {
                 continue;
             };
-            let clicked = Position::new(u32::from(input.0), diff.marker_width + 3);
+            let clicked = Position::new(input.0, diff.marker_width + 3);
             let backend = src_map.source_position(clicked);
             assert_eq!(backend.character, 3);
             assert_eq!(idx.map_position(filename, backend), Some(clicked));
@@ -695,9 +695,7 @@ mod tests {
         let p = idx.map_position("main.go", Position::new(37, 2)).unwrap();
         assert_eq!(p, Position::new(29, 3));
         assert_eq!(
-            diff.map_diff_line_to_src(p.line.try_into().unwrap())
-                .unwrap()
-                .source_line,
+            diff.map_diff_line_to_src(p.line).unwrap().source_line,
             SourceLineNumber(38)
         );
     }
@@ -717,7 +715,7 @@ mod tests {
 
         // Lines inside review comment boxes are never targets.
         let idx_values: Vec<InputLineNumber> = idx.map.values().copied().collect();
-        for n in 101..=110u16 {
+        for n in 101..=110u32 {
             assert!(!idx_values.contains(&InputLineNumber(n)));
         }
         // Multiple files are indexed.

@@ -30,3 +30,6 @@ jobs:
 
     - name: Run Format Check
       run: cargo fmt --check --verbose
+
+    - name: Run Clippy
+      run: cargo clippy --all-targets -- -D warnings

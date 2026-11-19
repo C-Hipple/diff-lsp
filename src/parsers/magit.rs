@@ -1,10 +1,10 @@
 use std::collections::HashMap;
-use std::str::FromStr;
 
 use chrono::Utc;
-use log::{info, trace};
+use log::info;
 use std::time::Instant;
 
+use crate::parsers::hunk_walker::{walk_hunks, DiffFlavor};
 use crate::parsers::utils::*;
 
 #[allow(dead_code)]
@@ -19,109 +19,49 @@ pub struct MagitDiff {
 impl Parsable for MagitDiff {
     fn parse(source: &str) -> Option<ParsedDiff> {
         let start = Instant::now();
-        if let Some(magit_diff) = MagitDiff::self_parse(source) {
-            info!(
-                "Parsed MagitDiff: {} files, {} mapped lines in {:?}",
-                magit_diff.filenames.len(),
-                magit_diff.lines_map.len(),
-                start.elapsed()
-            );
-            return Some(ParsedDiff {
-                headers: magit_diff.headers,
-                filenames: magit_diff.filenames,
-                lines_map: magit_diff.lines_map,
-                parsed_at: Utc::now(),
-                total_lines: 0,
-                // magit shows the source right after the marker, and its
-                // hunks are often indented throughout, which would read as
-                // code-review-server's "+ " layout.
-                marker_width: 1,
-            });
-        }
+        let magit_diff = MagitDiff::self_parse(source);
+        info!(
+            "Parsed MagitDiff: {} files, {} mapped lines in {:?}",
+            magit_diff.filenames.len(),
+            magit_diff.lines_map.len(),
+            start.elapsed()
+        );
+        Some(ParsedDiff {
+            headers: magit_diff.headers,
+            filenames: magit_diff.filenames,
+            lines_map: magit_diff.lines_map,
+            parsed_at: Utc::now(),
+            total_lines: 0,
+            // magit shows the source right after the marker, and its
+            // hunks are often indented throughout, which would read as
+            // code-review-server's "+ " layout.
+            marker_width: 1,
+        })
+    }
+}
+
+/// magit-status only labels file sections with `modified   path/to/file`.
+fn magit_file_header(line: &str) -> Option<&str> {
+    if line.starts_with("modified") {
+        line.split_whitespace().nth(1)
+    } else {
         None
     }
 }
 
-#[allow(dead_code)]
+const MAGIT_FLAVOR: DiffFlavor = DiffFlavor {
+    file_header: magit_file_header,
+    review_comments: false,
+};
+
 impl MagitDiff {
-    fn self_parse(source: &str) -> Option<Self> {
-        let mut diff = MagitDiff::default();
-
-        let mut found_headers = false;
-        let mut current_filename = "";
-        let mut building_hunk = false;
-        let mut start_new: u16 = 0;
-        let mut at_source_line: u16 = 0;
-
-        for (i, line) in source.lines().enumerate() {
-            if !found_headers {
-                if let Some(caps) = HEADER_LINE_RE.captures(line) {
-                    trace!("{}", line);
-                    match DiffHeader::from_str(&caps[1]) {
-                        Ok(header) => {
-                            diff.headers.insert(header, caps[2].to_string());
-                        }
-                        Err(_) => continue,
-                    }
-                } else {
-                    found_headers = true;
-                }
-            } else {
-                // found headers, moving onto hunks
-                if line.starts_with("modified") {
-                    current_filename = line.split_whitespace().nth(1).unwrap();
-                    trace!("Current filename when parsing: {:?}", current_filename);
-                    diff.filenames.push(current_filename.to_string());
-                }
-                if line.starts_with("@@") && !building_hunk {
-                    building_hunk = true;
-                    trace!("({:?}) Parsing Header `{}`", i, line);
-                    start_new = parse_header(line).unwrap().2;
-                    at_source_line = 0;
-                    continue;
-                }
-                if (line.starts_with("@@") && building_hunk) || line.starts_with("Recent commits") {
-                    if line.starts_with("@@") {
-                        trace!("B: ({:?}) Setting Header: `{}`", i, line);
-                        start_new = parse_header(line).unwrap().2;
-                        at_source_line = 0;
-                        continue;
-                    }
-                    if line.starts_with("Recent commits") {
-                        break;
-                    }
-                }
-
-                if building_hunk && !line.starts_with("modified ") {
-                    let line_type = LineType::from_line(line);
-                    let source_line_number = SourceLineNumber(start_new + at_source_line);
-                    let diff_line = DiffLine {
-                        line_type: line_type,
-                        line: line.to_string(),
-                        source_line_number,
-                    };
-
-                    // the i + 1 is because i is 0 index, but file lines are 1 index.
-                    diff.lines_map.insert(
-                        InputLineNumber::new((i + 1).try_into().unwrap()),
-                        (current_filename.to_string(), diff_line),
-                    );
-
-                    trace!(
-                        "C: ({:?})Adding line @ {:?} `{}`",
-                        i + 1,
-                        source_line_number.0,
-                        line
-                    );
-
-                    if matches!(line_type, LineType::Added | LineType::Unmodified) {
-                        at_source_line += 1;
-                    }
-
-                    continue;
-                }
-            }
+    fn self_parse(source: &str) -> Self {
+        let walked = walk_hunks(source, &MAGIT_FLAVOR);
+        MagitDiff {
+            headers: walked.headers,
+            filenames: walked.filenames,
+            lines_map: walked.lines_map,
+            src: String::new(),
         }
-        Some(diff)
     }
 }

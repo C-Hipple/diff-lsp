@@ -99,7 +99,8 @@ mod tests {
     #[test]
     fn test_uri_for_rel() {
         let output =
-            uri_from_relative_filename("/Users/chrishipple/diff-lsp/".to_string(), "src/main.rs");
+            uri_from_relative_filename("/Users/chrishipple/diff-lsp/".to_string(), "src/main.rs")
+                .unwrap();
         println!("output {:?}", output.as_str());
         assert_eq!(
             "file:///Users/chrishipple/diff-lsp/src/main.rs",

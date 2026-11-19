@@ -16,7 +16,7 @@
 //!   on line `n` corresponds to `SourceLineNumber(n + 1)`.  This mirrors the request
 //!   handlers in `server.rs`, which subtract 1 from the source line before forwarding.
 //! * [`InputLineNumber`] keys of `ParsedDiff::lines_map` are looked up by the server using
-//!   the editor's `position.line` *directly* (see `DiffLsp::get_source_map`).  To keep
+//!   the editor's `position.line` *directly* (see `DiffLsp::map_position`).  To keep
 //!   diagnostics consistent with hover/definition we use the inverse of that mapping:
 //!   `InputLineNumber(k)` is published on LSP line `k`.  See [`input_line_to_lsp_line`].
 
@@ -132,18 +132,16 @@ impl DiagnosticsStore {
 }
 
 /// Converts a diff-buffer input line number into the LSP line the editor uses for it.
-/// This is the inverse of `DiffLsp::get_source_map`, which uses `position.line` directly
+/// This is the inverse of `DiffLsp::map_position`, which uses `position.line` directly
 /// as the `lines_map` key.
 pub fn input_line_to_lsp_line(input_line: InputLineNumber) -> u32 {
-    input_line.0 as u32
+    input_line.0
 }
 
 /// Converts a 0-based backend (LSP) line to the 1-based [`SourceLineNumber`] used by the
 /// diff parsers.
 pub fn backend_line_to_source_line(line: u32) -> Option<SourceLineNumber> {
-    u16::try_from(line.checked_add(1)?)
-        .ok()
-        .map(SourceLineNumber::new)
+    line.checked_add(1).map(SourceLineNumber::new)
 }
 
 /// Reverse index: (relative file name, source line) -> diff buffer line.
@@ -157,13 +155,13 @@ pub fn backend_line_to_source_line(line: u32) -> Option<SourceLineNumber> {
 /// with a bogus source line number.
 #[derive(Debug, Default, Clone)]
 pub struct ReverseIndex {
-    map: HashMap<(String, u16), (InputLineNumber, DiffLine)>,
+    map: HashMap<(String, u32), (InputLineNumber, DiffLine)>,
 }
 
 impl ReverseIndex {
     pub fn build(diff: &ParsedDiff) -> Self {
         let skip_empty = diff.marker_width > 1;
-        let mut map: HashMap<(String, u16), (InputLineNumber, DiffLine)> = HashMap::new();
+        let mut map: HashMap<(String, u32), (InputLineNumber, DiffLine)> = HashMap::new();
         for (input_line, (filename, diff_line)) in diff.lines_map.iter() {
             if diff_line.line_type == LineType::Removed {
                 continue;
