@@ -37,7 +37,7 @@ diff-lsp.el can manage diff-lsp for the following modes:
 
 ## Diff locations (staying in the review)
 
-For **Find References**, **Jump Definition** and **Jump to type definition**, backend LSPs return locations in real source files.  When a returned location falls on a line that is visible in the diff (an added or unmodified line of a hunk for that file), diff-lsp also returns the matching location *inside the diff buffer* (the diff buffer's own URI, the diff line, and the column shifted past the `+`/`-`/space prefix — 2 columns for code-review-server buffers).  This lets "find references" during a code review jump around the review instead of opening files.
+For **Find References**, **Jump Definition** and **Jump to type definition**, backend LSPs return locations in real source files.  When a returned location falls on a line that is visible in the diff (an added or unmodified line of a hunk for that file), diff-lsp also returns the matching location *inside the diff buffer* (the diff buffer's own URI, the diff line, and the column shifted past the `+`/`-`/space marker, using the same marker width as the request mapping — 2 columns for code-review-server buffers).  This lets "find references" during a code review jump around the review instead of opening files.
 
 Configure it with `initializationOptions` from your editor:
 

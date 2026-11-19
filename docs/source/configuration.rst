@@ -52,8 +52,9 @@ added or unmodified line of a hunk for that file), ``diff-lsp`` additionally ret
 location inside the diff buffer, so navigation during a code review can stay in the review.
 
 The diff location uses the diff buffer's URI, the diff buffer line, and the character shifted past
-the diff line prefix (1 column for ``+``/``-``/space; 2 columns for code-review-server
-``Type: my-code-review`` buffers, which render ``"+ "``/``"- "``/``"  "``).
+the diff line's marker: the same marker width used when mapping requests to the backend (1 column
+for ``+``/``-``/space; 2 columns for code-review-server buffers, which render
+``"+ "``/``"- "``/``"  "``).
 
 Configure it via ``initializationOptions``:
 

@@ -20,6 +20,10 @@
 //! * `DiffLine::source_line_number` is 1-based (from the hunk header), while
 //!   backend `Location`s are 0-based LSP positions.  So a backend line `l`
 //!   corresponds to source line `l + 1`.
+//! * Columns: each diff line starts with `ParsedDiff::marker_width` columns of
+//!   +/-/space marker (1 for git/magit, 2 for code-review-server's `"+ "`).
+//!   The forward mapping (`SourceMap::source_position`) subtracts it; the
+//!   reverse mapping adds it back, so the two round-trip.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -27,7 +31,7 @@ use std::path::Path;
 use serde_json::Value;
 use tower_lsp::lsp_types::{GotoDefinitionResponse, Location, LocationLink, Position, Range, Url};
 
-use crate::parsers::utils::{DiffHeader, InputLineNumber, LineType, ParsedDiff};
+use crate::parsers::utils::{InputLineNumber, LineType, ParsedDiff};
 
 /// How diff-buffer locations are returned alongside backend locations.
 ///
@@ -69,18 +73,6 @@ impl DiffLocationsMode {
     }
 }
 
-/// Number of characters a diff buffer puts in front of each source line.
-///
-/// Standard unified diffs (magit-status, the original code-review package) use a
-/// single `+`/`-`/space column.  code-review-server (`Type: my-code-review`)
-/// renders lines as `"+ "`, `"- "` and `"  "`, i.e. two columns.
-pub fn diff_prefix_width(diff: &ParsedDiff) -> u32 {
-    match diff.headers.get(&DiffHeader::Type).map(|s| s.trim()) {
-        Some("my-code-review") => 2,
-        _ => 1,
-    }
-}
-
 /// Convert an `InputLineNumber` to the LSP line the editor uses for it.
 /// See the module docs for why this is the identity.
 pub fn input_line_to_lsp_line(input: InputLineNumber) -> u32 {
@@ -92,7 +84,7 @@ pub fn input_line_to_lsp_line(input: InputLineNumber) -> u32 {
 #[derive(Debug, Clone, Default)]
 pub struct ReverseIndex {
     map: HashMap<(String, u32), InputLineNumber>,
-    prefix_width: u32,
+    marker_width: u32,
 }
 
 impl ReverseIndex {
@@ -114,7 +106,7 @@ impl ReverseIndex {
         }
         ReverseIndex {
             map,
-            prefix_width: diff_prefix_width(diff),
+            marker_width: diff.marker_width,
         }
     }
 
@@ -138,7 +130,7 @@ impl ReverseIndex {
         let input = self.lookup(filename, pos.line + 1)?;
         Some(Position {
             line: input_line_to_lsp_line(input),
-            character: pos.character + self.prefix_width,
+            character: pos.character + self.marker_width,
         })
     }
 
@@ -319,6 +311,7 @@ mod tests {
     /// Small synthetic diff: two files, two hunks in a.rs, a removed line.
     fn synthetic() -> ParsedDiff {
         let mut d = ParsedDiff::default();
+        d.marker_width = 1;
         d.filenames = vec!["src/a.rs".into(), "src/b.rs".into()];
         let entries = vec![
             (5, "src/a.rs", line(LineType::Unmodified, " fn a() {", 10)),
@@ -613,12 +606,74 @@ mod tests {
         }
     }
 
+    /// A click in the diff, sent to the backend through main's forward
+    /// mapping (`SourceMap::source_position`), comes back through
+    /// `map_position` to the same diff line and column.
+    fn assert_position_round_trip(diff: &ParsedDiff) {
+        let idx = ReverseIndex::from_diff(diff);
+        let mut checked = 0;
+        for (input, (filename, dl)) in diff.lines_map.iter() {
+            if dl.line_type == LineType::Removed {
+                continue;
+            }
+            // Skip lines shadowed by an earlier occurrence of the same source
+            // line (magit staged + unstaged sections).
+            if idx.lookup(filename, u32::from(dl.source_line_number.0)) != Some(*input) {
+                continue;
+            }
+            // Only lines of a supported file type reach a backend.
+            let Some(src_map) = diff.map_diff_line_to_src(input.0) else {
+                continue;
+            };
+            let clicked = Position::new(u32::from(input.0), diff.marker_width + 3);
+            let backend = src_map.source_position(clicked);
+            assert_eq!(backend.character, 3);
+            assert_eq!(idx.map_position(filename, backend), Some(clicked));
+            checked += 1;
+        }
+        assert!(checked > 0);
+    }
+
+    #[test]
+    fn test_fixture_position_round_trips_with_source_position() {
+        for (name, width) in [
+            ("go_diff.magit_status", 1),
+            ("rust_diff.magit_status", 1),
+            ("go_diff.code_review", 1),
+            ("go_diff.code_review_server", 2),
+            ("go_diff.bun_client", 2),
+            ("rust_diff.bun_client", 1),
+        ] {
+            let diff = fixture(name);
+            assert_eq!(diff.marker_width, width, "{}", name);
+            assert_position_round_trip(&diff);
+        }
+    }
+
+    #[test]
+    fn test_bun_client_definition_round_trip() {
+        // tests/test_positions.rs: diff line 26 "+ \treturn Mul(x, 3)", the `x`
+        // at diff column 14 is demo.go 0-based (13, 12). A backend location
+        // there maps back to the same diff position.
+        let diff = fixture("go_diff.bun_client");
+        let idx = ReverseIndex::from_diff(&diff);
+        let fwd = diff
+            .map_diff_line_to_src(26)
+            .unwrap()
+            .source_position(Position::new(26, 14));
+        assert_eq!(fwd, Position::new(13, 12));
+        assert_eq!(
+            idx.map_position("demo.go", fwd),
+            Some(Position::new(26, 14))
+        );
+    }
+
     #[test]
     fn test_fixture_magit_go_conventions() {
         // go_diff.magit_status: "@@ -11,9 +11,10 @@" on file line 11, so the
         // first hunk line (file line 12) is source line 11.
         let diff = fixture("go_diff.magit_status");
-        assert_eq!(diff_prefix_width(&diff), 1);
+        assert_eq!(diff.marker_width, 1);
         let idx = ReverseIndex::from_diff(&diff);
         assert_eq!(idx.lookup("main.go", 11), Some(InputLineNumber(12)));
         // "+var logger *log.Logger" is file line 15 -> source line 14
@@ -651,7 +706,7 @@ mod tests {
     fn test_fixture_code_review_server_conventions() {
         let diff = fixture("go_diff.code_review_server");
         // code-review-server lines look like "+ \tWorkflowType ..." (2-char prefix)
-        assert_eq!(diff_prefix_width(&diff), 2);
+        assert_eq!(diff.marker_width, 2);
         let idx = ReverseIndex::from_diff(&diff);
         // README.md "@@ -33,6 +33,7 @@" on file line 39; "+ ReleaseCommandCheck"
         // is file line 43 -> source line 36.
