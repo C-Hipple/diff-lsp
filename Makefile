@@ -3,13 +3,19 @@ check:
 	echo "Compiling"; \
 	cargo build; \
 	if [ $$? -ne 0 ]; then \
-		echo "Formatter Check Failed."; \
+		echo "Build Failed."; \
 		failed=1; \
 	fi; \
 	echo "Running format check"; \
 	cargo fmt --check; \
 	if [ $$? -ne 0 ]; then \
 		echo "Formatter Check Failed."; \
+		failed=1; \
+	fi; \
+	echo "Running clippy"; \
+	cargo clippy --all-targets -- -D warnings; \
+	if [ $$? -ne 0 ]; then \
+		echo "Clippy Check Failed."; \
 		failed=1; \
 	fi; \
 	echo "Running cargo test"; \

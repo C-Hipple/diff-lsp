@@ -18,8 +18,14 @@ const LOG_FILE_PATH: &str = "~/.diff-lsp.log";
 /// Set to e.g. `debug` or `trace` to raise verbosity (default: `info`).
 const LOG_LEVEL_ENV: &str = "DIFF_LSP_LOG";
 
-fn logfile_path() -> PathBuf {
-    expanduser(LOG_FILE_PATH).unwrap()
+fn logfile_path() -> Option<PathBuf> {
+    match expanduser(LOG_FILE_PATH) {
+        Ok(path) => Some(path),
+        Err(e) => {
+            eprintln!("Couldn't expand log file path {}: {}", LOG_FILE_PATH, e);
+            None
+        }
+    }
 }
 
 /// Logs to a file that is opened once at startup. `LineWriter` flushes after
@@ -66,11 +72,10 @@ fn level_from_env() -> LevelFilter {
 }
 
 pub fn initialize_logger() -> Result<(), SetLoggerError> {
-    let file = match OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(logfile_path())
-    {
+    let Some(path) = logfile_path() else {
+        return Ok(());
+    };
+    let file = match OpenOptions::new().create(true).append(true).open(path) {
         Ok(file) => file,
         Err(e) => {
             eprintln!("Couldn't open log file: {}", e);

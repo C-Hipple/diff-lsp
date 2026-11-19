@@ -36,14 +36,13 @@ fn reverse_index_inverts_forward_mapping_for_all_fixtures() {
                 continue;
             }
             let file = files.iter().find(|f| &f.filename == filename).unwrap();
-            let backend_line = u32::from(line.source_line_number.0) - 1;
+            let backend_line = line.source_line_number.0 - 1;
             let fwd = diff.map_diff_line_to_src(key.0);
             if let Some(fwd) = fwd {
-                assert_eq!(u32::from(fwd.source_line.0) - 1, backend_line);
+                assert_eq!(fwd.source_line.0 - 1, backend_line);
             }
             assert_eq!(
-                file.visible[&backend_line].input_line,
-                u32::from(key.0),
+                file.visible[&backend_line].input_line, key.0,
                 "{name}: {filename} line {}",
                 key.0
             );

@@ -211,10 +211,8 @@ mod tests {
         // Test the main.go section which has a comment with a reply
         // around lines 296-305
         for line_num in 296..=305 {
-            let mapped = diff.map_diff_line_to_src(line_num);
-            if mapped.is_some() {
+            if let Some(map) = diff.map_diff_line_to_src(line_num) {
                 // If it maps, it should be to main.go
-                let map = mapped.unwrap();
                 if !map.source_line_text.is_empty() {
                     assert_eq!(map.file_name, "main.go".to_string());
                 }
