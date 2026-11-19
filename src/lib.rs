@@ -6,6 +6,7 @@ use strum_macros::EnumIter;
 
 pub mod client;
 pub mod parsers;
+pub mod reverse_map;
 pub mod server;
 pub mod utils;
 

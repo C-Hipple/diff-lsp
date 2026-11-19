@@ -22,6 +22,7 @@ use std::sync::{Arc, LazyLock};
 use tokio::sync::{Mutex, RwLock};
 
 use crate::client;
+use crate::reverse_map::{DiffLocationMapper, DiffLocationsMode, ReverseIndex};
 use crate::utils::{fetch_origin_nonblocking, get_unique_elements};
 
 use crate::SupportedFileType;
@@ -188,6 +189,8 @@ pub struct DiffLsp {
     command_override: Option<(String, Option<String>)>,
     pub diff_map: Mutex<HashMap<Url, Arc<ParsedDiff>>>,
     pub root: String, // The project root, without a trailing slash.  ~/diff-lsp for example
+    /// How backend locations are mapped back into the diff buffer (initializationOptions.diffLocations).
+    pub diff_locations_mode: std::sync::Mutex<DiffLocationsMode>,
 }
 
 impl DiffLsp {
@@ -201,6 +204,7 @@ impl DiffLsp {
             command_override: None,
             diff_map: Mutex::new(HashMap::new()),
             root,
+            diff_locations_mode: std::sync::Mutex::new(DiffLocationsMode::default()),
         };
         info!("Starting server: {:?}", server);
         server
@@ -328,6 +332,48 @@ impl DiffLsp {
         None
     }
 
+    fn diff_locations_mode(&self) -> DiffLocationsMode {
+        *self.diff_locations_mode.lock().unwrap()
+    }
+
+    /// Add diff-buffer locations to backend locations (see `reverse_map`).
+    async fn map_locations_to_diff(
+        &self,
+        diff_uri: &Url,
+        locs: Option<Vec<Location>>,
+    ) -> Option<Vec<Location>> {
+        let (locs, mode) = (locs?, self.diff_locations_mode());
+        let Some(diff) = self.get_diff(diff_uri).await else {
+            return Some(locs);
+        };
+        let index = ReverseIndex::from_diff(&diff);
+        let mapper = DiffLocationMapper {
+            index: &index,
+            root: &self.root,
+            diff_uri,
+        };
+        Some(mapper.map_locations(locs, mode))
+    }
+
+    /// Add diff-buffer locations to a goto-(type-)definition response.
+    async fn map_definition_to_diff(
+        &self,
+        diff_uri: &Url,
+        resp: Option<GotoDefinitionResponse>,
+    ) -> Option<GotoDefinitionResponse> {
+        let (resp, mode) = (resp?, self.diff_locations_mode());
+        let Some(diff) = self.get_diff(diff_uri).await else {
+            return Some(resp);
+        };
+        let index = ReverseIndex::from_diff(&diff);
+        let mapper = DiffLocationMapper {
+            index: &index,
+            root: &self.root,
+            diff_uri,
+        };
+        Some(mapper.map_definition_response(resp, mode))
+    }
+
     async fn refresh_file(&self, uri: &Url) -> Option<Arc<ParsedDiff>> {
         let real_path = uri.path();
         debug!("Calling refresh_file for the real path: {:?}", real_path);
@@ -352,7 +398,11 @@ impl DiffLsp {
 
 #[tower_lsp::async_trait]
 impl LanguageServer for DiffLsp {
-    async fn initialize(&self, _: InitializeParams) -> LspResult<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> LspResult<InitializeResult> {
+        let mode =
+            DiffLocationsMode::from_initialization_options(params.initialization_options.as_ref());
+        info!("diffLocations mode: {:?}", mode);
+        *self.diff_locations_mode.lock().unwrap() = mode;
         self.client
             .log_message(MessageType::WARNING, "Cruising")
             .await;
@@ -581,6 +631,7 @@ impl LanguageServer for DiffLsp {
 
     async fn references(&self, _params: ReferenceParams) -> LspResult<Option<Vec<Location>>> {
         let mut mapped_params = _params.clone();
+        let mapped_params_uri = _params.text_document_position.text_document.uri.clone();
         let Some(source_map) = self.get_source_map(_params.text_document_position).await else {
             return Ok(None);
         };
@@ -605,8 +656,9 @@ impl LanguageServer for DiffLsp {
             source_map.source_position(mapped_params.text_document_position.position);
 
         let references_result = backend.references(&mapped_params).await;
+        let diff_uri = &mapped_params_uri;
         match references_result {
-            Ok(res) => Ok(res),
+            Ok(res) => Ok(self.map_locations_to_diff(diff_uri, res).await),
             Err(e) => {
                 warn!("Backend request failed: {:?}", e);
                 Ok(None)
@@ -649,8 +701,9 @@ impl LanguageServer for DiffLsp {
         mapped_params.text_document_position_params.position =
             source_map.source_position(_params.text_document_position_params.position);
         let goto_def_res = backend.goto_definition(&mapped_params).await;
+        let diff_uri = &_params.text_document_position_params.text_document.uri;
         match goto_def_res {
-            Ok(res) => Ok(res),
+            Ok(res) => Ok(self.map_definition_to_diff(diff_uri, res).await),
             Err(e) => {
                 warn!("Backend request failed: {:?}", e);
                 Ok(None)
@@ -694,8 +747,9 @@ impl LanguageServer for DiffLsp {
             source_map.source_position(params.text_document_position_params.position);
 
         let goto_type_def_res = backend.goto_type_definition(&mapped_params).await;
+        let diff_uri = &params.text_document_position_params.text_document.uri;
         match goto_type_def_res {
-            Ok(res) => Ok(res),
+            Ok(res) => Ok(self.map_definition_to_diff(diff_uri, res).await),
             Err(e) => {
                 warn!("Backend request failed: {:?}", e);
                 Ok(None)

@@ -14,3 +14,6 @@ Features
 - **Definition**: Jump to the source code of a symbol.
 - **References**: Find all usages of a symbol.
 - **Type Definition**: Jump to the definition of a symbol's type.
+
+When a result of References, Definition or Type Definition lands on a line shown in the diff, the
+matching diff-buffer location is returned too. See :doc:`configuration` (Diff Locations).
