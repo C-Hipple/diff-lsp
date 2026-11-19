@@ -1,9 +1,8 @@
-use serde::{Deserialize, Serialize};
 use std::fs::read_to_string;
 use strum::IntoEnumIterator;
 
 use expanduser::expanduser;
-use log::info;
+use log::{info, warn};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -11,7 +10,6 @@ use std::path::PathBuf;
 use itertools::Itertools;
 use serde_json::Value;
 use tower_lsp::jsonrpc::{Error as LspError, ErrorCode, Result as LspResult};
-use tower_lsp::lsp_types::notification::Notification;
 use tower_lsp::lsp_types::request::{GotoTypeDefinitionParams, GotoTypeDefinitionResponse};
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
@@ -26,29 +24,6 @@ use crate::utils::{fetch_origin_nonblocking, get_unique_elements};
 
 use crate::SupportedFileType;
 use crate::*;
-
-#[derive(Debug, Deserialize, Serialize)]
-struct CustomNotificationParams {
-    title: String,
-    message: String,
-}
-
-impl CustomNotificationParams {
-    fn new(title: impl Into<String>, message: impl Into<String>) -> Self {
-        CustomNotificationParams {
-            title: title.into(),
-            message: message.into(),
-        }
-    }
-}
-
-enum CustomNotification {}
-
-impl Notification for CustomNotification {
-    type Params = CustomNotificationParams;
-
-    const METHOD: &'static str = "custom/notification";
-}
 
 pub fn create_backends_map(
     active_langs: Vec<SupportedFileType>,
@@ -93,7 +68,6 @@ pub fn read_initialization_params_from_tempfile(
                 worktree = Some(caps.get(1).unwrap().as_str().to_string());
             }
             if let Some(caps) = file_regex.captures(line) {
-                println!("caps: {:?}", caps.len());
                 let filename = caps.get(2).unwrap().as_str().to_string();
                 if let Some(file_type) = SupportedFileType::from_filename(filename) {
                     file_types.push(file_type);
@@ -103,11 +77,11 @@ pub fn read_initialization_params_from_tempfile(
                 // We want the last one, and strip b/
                 let files_part = caps.get(1).unwrap().as_str();
                 let last_file = files_part.split_whitespace().last().unwrap_or("");
-                let filename = if last_file.starts_with("b/") || last_file.starts_with("a/") {
-                    last_file[2..].to_string()
-                } else {
-                    last_file.to_string()
-                };
+                let filename = last_file
+                    .strip_prefix("b/")
+                    .or_else(|| last_file.strip_prefix("a/"))
+                    .unwrap_or(last_file)
+                    .to_string();
                 if let Some(file_type) = SupportedFileType::from_filename(filename) {
                     file_types.push(file_type);
                 }
@@ -119,7 +93,7 @@ pub fn read_initialization_params_from_tempfile(
             .map_err(|_| anyhow!("Failed to convert path to string"))?;
         Ok((expanded_cwd, worktree, get_unique_elements(&file_types)))
     } else {
-        return Err(anyhow!("Unable to read input tempfile"));
+        Err(anyhow!("Unable to read input tempfile"))
     }
 }
 
@@ -140,10 +114,7 @@ impl DiffLsp {
         let server = DiffLsp {
             client,
             backends,
-            diff_map: Mutex::new((|| {
-                let map: HashMap<Url, ParsedDiff> = HashMap::new();
-                map
-            })()),
+            diff_map: Mutex::new(HashMap::new()),
             root,
         };
         info!("Starting server: {:?}", server);
@@ -159,38 +130,78 @@ impl DiffLsp {
 
     async fn get_diff(&self, uri: &Url) -> Option<ParsedDiff> {
         let map = self.diff_map.lock().await;
-        map.get(&uri).cloned()
+        map.get(uri).cloned()
     }
 
-    async fn get_source_map(&self, text_params: TextDocumentPositionParams) -> Option<SourceMap> {
-        let line = text_params.position.line.try_into().unwrap();
-        return self
-            .line_to_source_map(text_params.text_document.uri.clone(), line)
-            .await;
-    }
-
-    async fn line_to_source_map(&self, uri: Url, line_num: u16) -> Option<SourceMap> {
-        if let Some(diff) = self.get_diff(&uri).await {
-            // info!("Found the diff at URI: {:?}", uri.clone());
+    async fn line_to_source_map(&self, uri: &Url, line_num: u32) -> Option<SourceMap> {
+        if let Some(diff) = self.get_diff(uri).await {
             info!("Used diff line count {:?}", diff.lines_map.len());
             info!("Used diff line parsed at {:?}", diff.parsed_at);
             info!("Used source with total lines: {:?}", diff.total_lines);
             return diff.map_diff_line_to_src(line_num);
         }
-        info!("Failed to find diff at URI: {:?}", uri.clone());
+        info!("Failed to find diff at URI: {:?}", uri);
         None
+    }
+
+    /// Maps a position in a diff buffer to the backend that serves the
+    /// underlying source file, and the equivalent position in that file.
+    ///
+    /// Returns `None` if the line isn't part of a hunk, the file type has no
+    /// backend, or a URI can't be built for the source file.
+    async fn map_position(
+        &self,
+        params: &TextDocumentPositionParams,
+    ) -> Option<(
+        Arc<Mutex<client::ClientForBackendServer>>,
+        TextDocumentPositionParams,
+        SourceMap,
+    )> {
+        let Some(source_map) = self
+            .line_to_source_map(&params.text_document.uri, params.position.line)
+            .await
+        else {
+            info!(
+                "Did not find a source map for line {:?}",
+                params.position.line
+            );
+            return None;
+        };
+        info!(
+            "source map: {:?} - {:?}",
+            source_map.source_line, source_map.source_line_text
+        );
+
+        let backend = self.get_backend(&source_map)?.clone();
+        let uri = uri_from_relative_filename(self.root.clone(), &source_map.file_name)?;
+
+        let mut mapped = params.clone();
+        mapped.text_document.uri = uri;
+        // I'm seeing the right line of my source map when I do actions
+        // but without this my hover on the 2nd line of a diff will give
+        // the first line, etc.
+        // I think there's a + 1 somewhere internally in the LSP servers?
+        mapped.position.line = source_map.source_line.0.saturating_sub(1);
+
+        Some((backend, mapped, source_map))
     }
 
     async fn refresh_file(&self, uri: &Url) -> Option<ParsedDiff> {
         let real_path = uri.path();
         info!("Calling refresh_file for the real path: {:?}", real_path);
 
-        let contents = fs::read_to_string(real_path).unwrap();
+        let contents = match fs::read_to_string(real_path) {
+            Ok(contents) => contents,
+            Err(e) => {
+                warn!("Unable to read diff buffer file {:?}: {}", real_path, e);
+                return None;
+            }
+        };
         if let Some(diff) = ParsedDiff::parse(&contents) {
             info!("Inserting diff! 2");
             let mut diff_map = self.diff_map.lock().await;
 
-            if let Some(diff_before) = diff_map.get(&uri) {
+            if let Some(diff_before) = diff_map.get(uri) {
                 info!("Diff before len: {:?}", diff_before.lines_map.len());
             }
             info!("Diff new len: {:?}", diff.lines_map.len());
@@ -206,17 +217,19 @@ impl DiffLsp {
 #[tower_lsp::async_trait]
 impl LanguageServer for DiffLsp {
     async fn initialize(&self, _: InitializeParams) -> LspResult<InitializeResult> {
-        self.client
-            .log_message(MessageType::WARNING, "Cruising")
-            .await;
         info!("Starting initialize");
-        for backend_mutex in self.backends.values().into_iter() {
+        for backend_mutex in self.backends.values() {
             let mut backend = backend_mutex.lock().await;
             info!(
                 "Diff LSP doing initialize for backend: {:?}",
                 backend.lsp_command
             );
-            backend.initialize().unwrap();
+            if let Err(e) = backend.initialize() {
+                warn!(
+                    "Failed to initialize backend {:?}: {:?}",
+                    backend.lsp_command, e
+                );
+            }
         }
 
         let res = Ok(InitializeResult {
@@ -226,7 +239,11 @@ impl LanguageServer for DiffLsp {
             }),
             capabilities: ServerCapabilities {
                 execute_command_provider: Some(ExecuteCommandOptions {
-                    commands: vec!["custom.notification".to_string()],
+                    commands: vec![
+                        "refresh".to_string(),
+                        "fetch".to_string(),
+                        "check".to_string(),
+                    ],
                     ..Default::default()
                 }),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
@@ -236,15 +253,14 @@ impl LanguageServer for DiffLsp {
                 // document_symbol_provider: Some(OneOf::Left(true)),
                 ..ServerCapabilities::default()
             },
-            ..Default::default()
         });
-        info!("Finished initialize! {:?}", res.clone().unwrap());
+        info!("Finished initialize! {:?}", res);
         res
     }
 
     async fn initialized(&self, _: InitializedParams) {
         info!("Starting Initialized");
-        for backend_mutex in self.backends.values().into_iter() {
+        for backend_mutex in self.backends.values() {
             let mut backend = backend_mutex.lock().await;
             info!(
                 "Diff LSP doing initialized for backend: {:?}",
@@ -264,20 +280,7 @@ impl LanguageServer for DiffLsp {
 
     async fn execute_command(&self, params: ExecuteCommandParams) -> LspResult<Option<Value>> {
         info!("Doing command with params: {:?}", params);
-        if params.command == "custom.notification" {
-            self.client
-                .send_notification::<CustomNotification>(CustomNotificationParams::new(
-                    "Hello", "Message",
-                ))
-                .await;
-            self.client
-                .log_message(
-                    MessageType::INFO,
-                    format!("Command execute with params: {params:?}"),
-                )
-                .await;
-            Ok(None)
-        } else if params.command == "refresh" {
+        if params.command == "refresh" {
             let keys = {
                 // unlocks when the reference goes out of scope
                 let diff_map = self.diff_map.lock().await;
@@ -291,12 +294,13 @@ impl LanguageServer for DiffLsp {
             fetch_origin_nonblocking(&self.root);
             Ok(None)
         } else if params.command == "fetch" {
-            let mut child = fetch_origin_nonblocking(&self.root);
-            let _ = child.wait().await;
+            if let Some(mut child) = fetch_origin_nonblocking(&self.root) {
+                let _ = child.wait().await;
+            }
             Ok(None)
         } else if params.command == "check" {
             info!("Doing check!");
-            for backend_mutex in self.backends.values().into_iter() {
+            for backend_mutex in self.backends.values() {
                 let mut backend = backend_mutex.lock().await;
                 backend.check_messages();
             }
@@ -309,54 +313,21 @@ impl LanguageServer for DiffLsp {
     async fn hover(&self, params: HoverParams) -> LspResult<Option<Hover>> {
         info!(
             "Doing hover: {:?}-{:?}",
-            params.text_document_position_params.position.line - 1,
+            params.text_document_position_params.position.line,
             params.text_document_position_params.position.character,
         );
-        let source_map_res = self
-            .get_source_map(params.text_document_position_params.clone())
-            .await;
-
-        let source_map = match source_map_res {
-            Some(sm) => sm,
-            None => {
-                info!("Did not find a source map for this hover!");
-                return Err(LspError::new(ErrorCode::ServerError(1)));
-            }
+        let Some((backend, position, _)) = self
+            .map_position(&params.text_document_position_params)
+            .await
+        else {
+            return Err(server_error());
         };
-
-        info!(
-            "source map: {:?} - {:?}",
-            source_map.source_line, source_map.source_line_text
-        );
-        let backend_mutex_res = self.get_backend(&source_map);
-        let backend_mutex = match backend_mutex_res {
-            Some(bm) => bm,
-            None => return Err(LspError::new(ErrorCode::ServerError(1))),
+        let mapped_params = HoverParams {
+            text_document_position_params: position,
+            ..params
         };
-        let mut backend = backend_mutex.lock().await;
-        // TODO do all this mapping in an async func since there's a lot of cloning and whatnot and then futures::join! it with the backend_mutex
-        let mut mapped_params = params.clone();
-        let uri = uri_from_relative_filename(self.root.clone(), &source_map.file_name);
-
-        mapped_params
-            .text_document_position_params
-            .text_document
-            .uri = uri;
-
-        mapped_params.text_document_position_params.position.line = source_map.source_line.0.into();
-        // I'm seeing the right line of my source map when I do actions
-        // but without this my hover on the 2nd line of a diff will give
-        // the first line, etc.
-        // I think there's a + 1 somewhere internally in the LSP servers?
-        mapped_params.text_document_position_params.position.line -= 1;
-
-        // info!("Hover mapped params: {:?}", mapped_params);
-        let hov_res = backend.hover(mapped_params);
-        // info!("Hover res: {:?}", hov_res);
-        match hov_res {
-            Ok(res) => Ok(res),
-            Err(_) => Err(LspError::new(ErrorCode::ServerError(1))), // Translating LspError type
-        }
+        let res = backend.lock().await.hover(mapped_params);
+        res.map_err(|_| server_error())
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
@@ -365,16 +336,19 @@ impl LanguageServer for DiffLsp {
             for filename in filtered_files {
                 let filetype = SupportedFileType::from_filename(filename.clone());
 
-                if let None = filetype {
+                let Some(filetype) = filetype else {
                     continue;
-                }
+                };
 
-                if let Some(backend_mutex) = self.backends.get(&filetype.unwrap()) {
+                if let Some(backend_mutex) = self.backends.get(&filetype) {
+                    // Here we need to break the LSP contract and use the originator's didOpen URI to read the contents of the file.
+                    let Some(uri) = uri_from_relative_filename(self.root.clone(), &filename)
+                    else {
+                        continue;
+                    };
                     let mut backend = backend_mutex.lock().await;
                     let mut these_params = params.clone();
-                    // Here we need to break the LSP contract and use the originator's didOpen URI to read the contents of the file.
-                    these_params.text_document.uri =
-                        uri_from_relative_filename(self.root.clone(), &filename);
+                    these_params.text_document.uri = uri;
 
                     let full_path = these_params
                         .text_document
@@ -407,103 +381,57 @@ impl LanguageServer for DiffLsp {
         self.refresh_file(&params.text_document.uri).await;
     }
 
-    async fn references(&self, _params: ReferenceParams) -> LspResult<Option<Vec<Location>>> {
-        let mut mapped_params = _params.clone();
-        let source_map = self
-            .get_source_map(_params.text_document_position)
-            .await
-            .ok_or(LspError::new(ErrorCode::ServerError(1)))?;
-
-        let backend_mutex_res = self.get_backend(&source_map);
-        let backend_mutex = match backend_mutex_res {
-            Some(bm) => bm,
-            None => return Err(LspError::new(ErrorCode::ServerError(1))),
+    async fn references(&self, params: ReferenceParams) -> LspResult<Option<Vec<Location>>> {
+        let Some((backend, position, _)) = self.map_position(&params.text_document_position).await
+        else {
+            return Err(server_error());
         };
-
-        let mut backend = backend_mutex.lock().await;
-
-        let uri = uri_from_relative_filename(self.root.clone(), &source_map.file_name);
-        mapped_params.text_document_position.text_document.uri = uri;
-        mapped_params.text_document_position.position.line = source_map.source_line.0.into();
-
-        // Same as for hover
-        mapped_params.text_document_position.position.line -= 1;
-
-        let references_result = backend.references(&mapped_params);
-        match references_result {
-            Ok(res) => Ok(res),
-            Err(_) => Err(LspError::new(ErrorCode::ServerError(1))), // Translating LspError type
-        }
+        let mapped_params = ReferenceParams {
+            text_document_position: position,
+            ..params
+        };
+        let res = backend.lock().await.references(&mapped_params);
+        res.map_err(|_| server_error())
     }
 
     async fn goto_definition(
         &self,
-        _params: GotoDefinitionParams,
+        params: GotoDefinitionParams,
     ) -> LspResult<Option<GotoDefinitionResponse>> {
-        let source_map = self
-            .get_source_map(_params.text_document_position_params.clone())
+        let Some((backend, position, _)) = self
+            .map_position(&params.text_document_position_params)
             .await
-            .ok_or(LspError::new(ErrorCode::ServerError(1)))?;
-
-        let mut mapped_params = _params.clone();
-        let backend_mutex_res = self.get_backend(&source_map);
-        let backend_mutex = match backend_mutex_res {
-            Some(bm) => bm,
-            None => return Err(LspError::new(ErrorCode::ServerError(1))),
+        else {
+            return Err(server_error());
         };
-
-        let mut backend = backend_mutex.lock().await;
-
-        let uri = uri_from_relative_filename(self.root.clone(), &source_map.file_name);
-
-        mapped_params
-            .text_document_position_params
-            .text_document
-            .uri = uri;
-        mapped_params.text_document_position_params.position.line = source_map.source_line.0.into();
-
-        // same as for hover
-        mapped_params.text_document_position_params.position.line -= 1;
-        let goto_def_res = backend.goto_definition(&mapped_params);
-        match goto_def_res {
-            Ok(res) => Ok(res),
-            Err(_) => Err(LspError::new(ErrorCode::ServerError(1))), // Translating LspError type
-        }
+        let mapped_params = GotoDefinitionParams {
+            text_document_position_params: position,
+            ..params
+        };
+        let res = backend.lock().await.goto_definition(&mapped_params);
+        res.map_err(|_| server_error())
     }
 
     async fn goto_type_definition(
         &self,
         params: GotoTypeDefinitionParams,
     ) -> LspResult<Option<GotoTypeDefinitionResponse>> {
-        let source_map = self
-            .get_source_map(params.text_document_position_params.clone())
+        let Some((backend, position, _)) = self
+            .map_position(&params.text_document_position_params)
             .await
-            .ok_or(LspError::new(ErrorCode::ServerError(1)))?;
-
-        let mut mapped_params = params.clone();
-        let backend_mutex_res = self.get_backend(&source_map);
-        let backend_mutex = match backend_mutex_res {
-            Some(bm) => bm,
-            None => return Err(LspError::new(ErrorCode::ServerError(1))),
+        else {
+            return Err(server_error());
         };
-
-        let mut backend = backend_mutex.lock().await;
-
-        let uri = uri_from_relative_filename(self.root.clone(), &source_map.file_name);
-
-        mapped_params
-            .text_document_position_params
-            .text_document
-            .uri = uri;
-        mapped_params.text_document_position_params.position.line = source_map.source_line.0.into();
-
-        // same as for hover
-        mapped_params.text_document_position_params.position.line -= 1;
-
-        let goto_type_def_res = backend.goto_type_definition(&mapped_params);
-        match goto_type_def_res {
-            Ok(res) => Ok(res),
-            Err(_) => Err(LspError::new(ErrorCode::ServerError(1))), // Translating LspError type
-        }
+        let mapped_params = GotoTypeDefinitionParams {
+            text_document_position_params: position,
+            ..params
+        };
+        let res = backend.lock().await.goto_type_definition(&mapped_params);
+        res.map_err(|_| server_error())
     }
+}
+
+/// The error currently returned when a request can't be served.
+fn server_error() -> LspError {
+    LspError::new(ErrorCode::ServerError(1))
 }

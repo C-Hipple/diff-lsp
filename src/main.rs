@@ -13,9 +13,8 @@ use diff_lsp::utils::{fetch_origin_nonblocking, get_most_recent_file};
 
 const LOG_FILE_PATH: &str = "~/.diff-lsp.log";
 
-fn logfile_path() -> PathBuf {
-    // println!("setting logfile path");
-    expanduser(LOG_FILE_PATH).unwrap()
+fn logfile_path() -> Option<PathBuf> {
+    expanduser(LOG_FILE_PATH).ok()
 }
 
 struct FileLogger;
@@ -27,11 +26,11 @@ impl Log for FileLogger {
 
     fn log(&self, record: &Record) {
         if self.enabled(record.metadata()) {
-            let mut file = match OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(logfile_path())
-            {
+            let Some(path) = logfile_path() else {
+                eprintln!("Couldn't resolve log file path {}", LOG_FILE_PATH);
+                return;
+            };
+            let mut file = match OpenOptions::new().create(true).append(true).open(path) {
                 Ok(file) => file,
                 Err(e) => {
                     eprintln!("Couldn't open log file: {}", e);
@@ -55,7 +54,9 @@ impl Log for FileLogger {
     }
 
     fn flush(&self) {
-        remove_file(logfile_path()).unwrap();
+        if let Some(path) = logfile_path() {
+            let _ = remove_file(path);
+        }
     }
 }
 
@@ -97,7 +98,6 @@ async fn main() {
         }
     };
 
-    info!("hurr");
     fetch_origin_nonblocking(&cwd);
 
     let mut backend_root = cwd.clone();

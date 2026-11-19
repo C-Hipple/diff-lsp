@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use tokio::process::Command;
 
-use log::info;
+use log::{info, warn};
 
-pub fn get_unique_elements<T: Eq + std::hash::Hash + Copy>(vec: &Vec<T>) -> Vec<T> {
+pub fn get_unique_elements<T: Eq + std::hash::Hash + Copy>(vec: &[T]) -> Vec<T> {
     let mut set = HashSet::new();
     let mut unique_vec = Vec::new();
     for &element in vec {
@@ -18,14 +18,22 @@ pub fn get_unique_elements<T: Eq + std::hash::Hash + Copy>(vec: &Vec<T>) -> Vec<
     unique_vec
 }
 
-pub fn fetch_origin_nonblocking(repo_path: &str) -> tokio::process::Child {
+/// Spawns `git fetch origin` in `repo_path`.  Returns `None` (and logs) if
+/// the command couldn't be spawned, e.g. git missing or the dir doesn't exist.
+pub fn fetch_origin_nonblocking(repo_path: &str) -> Option<tokio::process::Child> {
     info!("Running git fetch for repo {:?}", repo_path);
-    Command::new("git")
+    match Command::new("git")
         .current_dir(repo_path)
         .arg("fetch")
         .arg("origin")
         .spawn()
-        .expect("Failed to spawn git fetch command")
+    {
+        Ok(child) => Some(child),
+        Err(e) => {
+            warn!("Failed to spawn git fetch in {:?}: {}", repo_path, e);
+            None
+        }
+    }
 }
 
 pub fn get_most_recent_file(dir_path: &str, prefix: &str) -> io::Result<Option<PathBuf>> {

@@ -4,6 +4,15 @@ use url::Url;
 
 use strum_macros::EnumIter;
 
+// TODO: client.rs is being rewritten separately; drop this allow once that
+// lands and its remaining clippy lints are fixed.
+#[allow(
+    clippy::assign_op_pattern,
+    clippy::clone_on_copy,
+    clippy::needless_return,
+    clippy::let_unit_value,
+    clippy::needless_late_init
+)]
 pub mod client;
 pub mod parsers;
 pub mod server;
@@ -44,7 +53,7 @@ impl SupportedFileType {
         filename
             .rsplit_once('.')
             .map(|(_name, extension)| extension.to_string())
-            .and_then(|extension| SupportedFileType::from_extension(extension))
+            .and_then(SupportedFileType::from_extension)
     }
 }
 
@@ -74,7 +83,14 @@ pub fn get_lsp_for_file_type(file_type: SupportedFileType) -> (String, Option<St
     }
 }
 
-pub fn uri_from_relative_filename(project_root: String, rel_filename: &str) -> Url {
+/// Builds a `file://` URI from the project root and a diff-relative filename.
+/// Returns `None` if the resulting path isn't absolute.
+pub fn uri_from_relative_filename(project_root: String, rel_filename: &str) -> Option<Url> {
     // since teh diff has a relative path like /src/lib.rs and not a full path.
-    Url::from_file_path(project_root + "/" + rel_filename).unwrap()
+    let path = project_root + "/" + rel_filename;
+    let uri = Url::from_file_path(&path).ok();
+    if uri.is_none() {
+        log::warn!("Unable to build a file URI from path {:?}", path);
+    }
+    uri
 }

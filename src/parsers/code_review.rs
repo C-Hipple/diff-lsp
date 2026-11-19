@@ -1,10 +1,8 @@
 use std::collections::HashMap;
-use std::str::FromStr;
 
 use chrono::Utc;
-use log::info;
-use regex::Regex;
 
+use crate::parsers::hunk_walker::{walk_hunks, DiffFlavor};
 use crate::parsers::utils::*;
 
 /// CodeReviewDiffs are the output of the code-review emacs package
@@ -22,152 +20,49 @@ pub struct CodeReviewDiff {
 
 impl Parsable for CodeReviewDiff {
     fn parse(source: &str) -> Option<ParsedDiff> {
-        if let Some(cr_diff) = CodeReviewDiff::self_parse(source) {
-            return Some(ParsedDiff {
-                headers: cr_diff.headers,
-                filenames: cr_diff.filenames,
-                lines_map: cr_diff.lines_map,
-                parsed_at: Utc::now(),
-                total_lines: cr_diff.total_lines,
-            });
-        }
-        None
+        let cr_diff = CodeReviewDiff::self_parse(source);
+        Some(ParsedDiff {
+            headers: cr_diff.headers,
+            filenames: cr_diff.filenames,
+            lines_map: cr_diff.lines_map,
+            parsed_at: Utc::now(),
+            total_lines: cr_diff.total_lines,
+        })
     }
 }
 
+/// Recognizes `modified`, `new file`, `deleted` and `diff --git a/x b/x`
+/// file headers (with variable whitespace).
+fn code_review_file_header(line: &str) -> Option<&str> {
+    if !is_file_header(line) {
+        return None;
+    }
+    let last = line.split_whitespace().last()?;
+    if line.starts_with("diff --git") {
+        Some(
+            last.strip_prefix("b/")
+                .or_else(|| last.strip_prefix("a/"))
+                .unwrap_or(last),
+        )
+    } else {
+        Some(last)
+    }
+}
+
+const CODE_REVIEW_FLAVOR: DiffFlavor = DiffFlavor {
+    file_header: code_review_file_header,
+    review_comments: true,
+};
+
 impl CodeReviewDiff {
-    fn self_parse(source: &str) -> Option<Self> {
-        let mut diff = CodeReviewDiff::default();
-
-        let mut found_headers = false;
-        let mut current_filename = "";
-        let mut building_hunk = false;
-        let mut start_new: u16 = 0; // TODO new variable name
-        let mut at_source_line: u16 = 0;
-        let mut in_review = false;
-        let mut line_num;
-
-        for (i, line) in source.lines().enumerate() {
-            if !found_headers {
-                let re = Regex::new(r"(\w+):\s+(.+)").unwrap();
-                if let Some(caps) = re.captures(line) {
-                    info!("{}", line);
-                    match DiffHeader::from_str(&caps[1]) {
-                        Ok(header) => {
-                            diff.headers.insert(header, caps[2].to_string());
-                            continue;
-                        }
-                        Err(_) => continue,
-                    }
-                } else {
-                    found_headers = true;
-                }
-            }
-
-            // found headers, moving onto hunks
-            line_num = i + 1;
-            if is_file_header(line) {
-                current_filename = if line.starts_with("diff --git") {
-                    let last = line.split_whitespace().last().unwrap();
-                    if last.starts_with("b/") || last.starts_with("a/") {
-                        &last[2..]
-                    } else {
-                        last
-                    }
-                } else {
-                    line.split_whitespace().last().unwrap()
-                };
-                info!("Current filename when parsing: {:?}", current_filename);
-                diff.filenames.push(current_filename.to_string());
-                building_hunk = false;
-            }
-            if line.starts_with("@@") && !building_hunk {
-                building_hunk = true;
-                info!("({:?}) Parsing Header `{}`", line_num, line);
-                start_new = parse_header(line).unwrap().2;
-                at_source_line = 0;
-                continue;
-            }
-            if (line.starts_with("@@") && building_hunk) || line.starts_with("Recent commits") {
-                if line.starts_with("@@") {
-                    info!("B: ({:?}) Setting Header: `{}`", line_num, line);
-                    start_new = parse_header(line).unwrap().2;
-                    at_source_line = 0;
-                    continue;
-                }
-                if line.starts_with("Recent commits") {
-                    break;
-                }
-            }
-
-            if building_hunk {
-                // Handle old format (Reviewed by / Comment by)
-                if line.starts_with("Reviewed by") || line.starts_with("Comment by") {
-                    info!("D: ({:?}) Review Start (old format): {}", line_num, line);
-                    in_review = true;
-                    continue;
-                }
-
-                // Handle new format (box-drawing comments from code-review-server)
-                // Comment boxes start with "    ┌─ REVIEW COMMENT ─────"
-                if line.trim_start().starts_with("┌─ REVIEW COMMENT") {
-                    info!(
-                        "D: ({:?}) Box Comment Start (new format): {}",
-                        line_num, line
-                    );
-                    in_review = true;
-                    continue;
-                }
-            }
-
-            if in_review {
-                // Handle old format end (dashed line)
-                if line.starts_with("-------") {
-                    info!("D: ({:?}) Review End (old format): {}", line_num, line);
-                    in_review = false;
-                    continue;
-                }
-
-                // Handle new format end (box-drawing bottom)
-                // Comment boxes end with "    └──────────────────────────────"
-                if line.trim_start().starts_with("└") {
-                    info!("D: ({:?}) Box Comment End (new format): {}", line_num, line);
-                    in_review = false;
-                    continue;
-                }
-
-                // Skip all lines within comments (both formats)
-                info!("D: ({:?}) Review Line: {}", line_num, line);
-                continue;
-            }
-
-            if building_hunk && !is_file_header(line) {
-                let line_type = LineType::from_line(line);
-                let diff_line = DiffLine {
-                    line_type: line_type,
-                    line: line.to_string(),
-                    source_line_number: SourceLineNumber(start_new + at_source_line),
-                };
-
-                // the  line_num is because line_num is 0 index, but file lines are 1 index.
-                diff.lines_map.insert(
-                    InputLineNumber::new((line_num).try_into().unwrap()),
-                    (current_filename.to_string(), diff_line.clone()),
-                );
-
-                info!(
-                    "C: ({:?}) Adding line @ {:?} `{}`",
-                    line_num, diff_line.source_line_number.0, line
-                );
-
-                if matches!(line_type, LineType::Added | LineType::Unmodified) {
-                    at_source_line += 1;
-                }
-
-                continue;
-            }
+    fn self_parse(source: &str) -> Self {
+        let walked = walk_hunks(source, &CODE_REVIEW_FLAVOR);
+        CodeReviewDiff {
+            headers: walked.headers,
+            filenames: walked.filenames,
+            lines_map: walked.lines_map,
+            total_lines: walked.total_lines,
+            src: String::new(),
         }
-        diff.total_lines = source.lines().count();
-        Some(diff)
     }
 }
