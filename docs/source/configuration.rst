@@ -42,3 +42,40 @@ How it works
 4. If the worktree subfolder does not exist, ``diff-lsp`` gracefully falls back to using the ``Root`` path.
 
 This is particularly useful for monorepos or projects where the LSP should be scoped to a specific part of the codebase.
+
+Diff Locations
+--------------
+
+For references, goto-definition and goto-type-definition, backend LSPs return locations in real
+source files. When such a location falls on a source line that is visible in the diff buffer (an
+added or unmodified line of a hunk for that file), ``diff-lsp`` additionally returns the matching
+location inside the diff buffer, so navigation during a code review can stay in the review.
+
+The diff location uses the diff buffer's URI, the diff buffer line, and the character shifted past
+the diff line prefix (1 column for ``+``/``-``/space; 2 columns for code-review-server
+``Type: my-code-review`` buffers, which render ``"+ "``/``"- "``/``"  "``).
+
+Configure it via ``initializationOptions``:
+
+.. code-block:: json
+
+   { "diffLocations": "both" }
+
+* ``both`` (default): diff locations first, followed by all source locations, deduplicated.
+  A single (scalar) definition becomes a list ``[diff location, source location]``.
+* ``prefer``: source locations that are visible in the diff are replaced by their diff location;
+  all other locations are returned as-is.
+* ``off``: backend results are returned unchanged.
+
+``LocationLink`` results map ``targetUri``, ``targetSelectionRange`` and ``targetRange`` (if the
+end of the target range is not visible in the diff it collapses to the selection start).
+Locations outside the project ``Root`` and removed lines are never mapped.
+
+Emacs (lsp-mode) example:
+
+.. code-block:: elisp
+
+   (lsp-register-client
+    (make-lsp-client
+     ;; ...
+     :initialization-options '(:diffLocations "prefer")))

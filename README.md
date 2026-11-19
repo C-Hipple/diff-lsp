@@ -35,6 +35,24 @@ diff-lsp.el can manage diff-lsp for the following modes:
 * [code-review-server emacs client](https://www.github.com/C-Hipple/code-review-server)
 * [code-review](https://www.github.com/C-Hipple/code-review)
 
+## Diff locations (staying in the review)
+
+For **Find References**, **Jump Definition** and **Jump to type definition**, backend LSPs return locations in real source files.  When a returned location falls on a line that is visible in the diff (an added or unmodified line of a hunk for that file), diff-lsp also returns the matching location *inside the diff buffer* (the diff buffer's own URI, the diff line, and the column shifted past the `+`/`-`/space prefix — 2 columns for code-review-server buffers).  This lets "find references" during a code review jump around the review instead of opening files.
+
+Configure it with `initializationOptions` from your editor:
+
+```json
+{ "diffLocations": "both" }
+```
+
+| value    | behaviour |
+|----------|-----------|
+| `both` (default) | Diff locations first, then all source locations (deduplicated). |
+| `prefer` | Each source location visible in the diff is replaced by its diff location; others are kept. |
+| `off`    | Backend results are returned unchanged. |
+
+Locations outside the project root (std lib, dependencies) and lines that are not shown in the diff (including removed lines) are returned as plain source locations.
+
 ## Backend startup
 
 Backend LSPs are started for the languages found in the initialization file. If a later diff contains a new language, its backend is started on demand when the buffer is opened; no restart needed.
