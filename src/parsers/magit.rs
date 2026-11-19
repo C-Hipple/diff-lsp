@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use chrono::Utc;
-use log::info;
-use regex::Regex;
+use log::{info, trace};
+use std::time::Instant;
 
 use crate::parsers::utils::*;
 
@@ -18,7 +18,14 @@ pub struct MagitDiff {
 
 impl Parsable for MagitDiff {
     fn parse(source: &str) -> Option<ParsedDiff> {
+        let start = Instant::now();
         if let Some(magit_diff) = MagitDiff::self_parse(source) {
+            info!(
+                "Parsed MagitDiff: {} files, {} mapped lines in {:?}",
+                magit_diff.filenames.len(),
+                magit_diff.lines_map.len(),
+                start.elapsed()
+            );
             return Some(ParsedDiff {
                 headers: magit_diff.headers,
                 filenames: magit_diff.filenames,
@@ -48,9 +55,8 @@ impl MagitDiff {
 
         for (i, line) in source.lines().enumerate() {
             if !found_headers {
-                let re = Regex::new(r"(\w+):\s+(.+)").unwrap();
-                if let Some(caps) = re.captures(line) {
-                    info!("{}", line);
+                if let Some(caps) = HEADER_LINE_RE.captures(line) {
+                    trace!("{}", line);
                     match DiffHeader::from_str(&caps[1]) {
                         Ok(header) => {
                             diff.headers.insert(header, caps[2].to_string());
@@ -64,19 +70,19 @@ impl MagitDiff {
                 // found headers, moving onto hunks
                 if line.starts_with("modified") {
                     current_filename = line.split_whitespace().nth(1).unwrap();
-                    info!("Current filename when parsing: {:?}", current_filename);
+                    trace!("Current filename when parsing: {:?}", current_filename);
                     diff.filenames.push(current_filename.to_string());
                 }
                 if line.starts_with("@@") && !building_hunk {
                     building_hunk = true;
-                    info!("({:?}) Parsing Header `{}`", i, line);
+                    trace!("({:?}) Parsing Header `{}`", i, line);
                     start_new = parse_header(line).unwrap().2;
                     at_source_line = 0;
                     continue;
                 }
                 if (line.starts_with("@@") && building_hunk) || line.starts_with("Recent commits") {
                     if line.starts_with("@@") {
-                        info!("B: ({:?}) Setting Header: `{}`", i, line);
+                        trace!("B: ({:?}) Setting Header: `{}`", i, line);
                         start_new = parse_header(line).unwrap().2;
                         at_source_line = 0;
                         continue;
@@ -88,22 +94,23 @@ impl MagitDiff {
 
                 if building_hunk && !line.starts_with("modified ") {
                     let line_type = LineType::from_line(line);
+                    let source_line_number = SourceLineNumber(start_new + at_source_line);
                     let diff_line = DiffLine {
                         line_type: line_type,
                         line: line.to_string(),
-                        source_line_number: SourceLineNumber(start_new + at_source_line),
+                        source_line_number,
                     };
 
                     // the i + 1 is because i is 0 index, but file lines are 1 index.
                     diff.lines_map.insert(
                         InputLineNumber::new((i + 1).try_into().unwrap()),
-                        (current_filename.to_string(), diff_line.clone()),
+                        (current_filename.to_string(), diff_line),
                     );
 
-                    info!(
+                    trace!(
                         "C: ({:?})Adding line @ {:?} `{}`",
                         i + 1,
-                        diff_line.source_line_number.0,
+                        source_line_number.0,
                         line
                     );
 

@@ -1,68 +1,84 @@
-use std::fs::{remove_file, OpenOptions};
-
-use std::io::prelude::*;
+use std::fs::{File, OpenOptions};
+use std::io::{prelude::*, LineWriter};
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use chrono::Local;
 use expanduser::expanduser;
-use log::{info, Level, LevelFilter, Log, Metadata, Record, SetLoggerError};
+use log::{info, LevelFilter, Log, Metadata, Record, SetLoggerError};
 use tower_lsp::{LspService, Server};
 
 use diff_lsp::server::{create_backends_map, read_initialization_params_from_tempfile, DiffLsp};
 use diff_lsp::utils::{fetch_origin_nonblocking, get_most_recent_file};
 
 const LOG_FILE_PATH: &str = "~/.diff-lsp.log";
+/// Set to e.g. `debug` or `trace` to raise verbosity (default: `info`).
+const LOG_LEVEL_ENV: &str = "DIFF_LSP_LOG";
 
 fn logfile_path() -> PathBuf {
-    // println!("setting logfile path");
     expanduser(LOG_FILE_PATH).unwrap()
 }
 
-struct FileLogger;
+/// Logs to a file that is opened once at startup. `LineWriter` flushes after
+/// every newline, so each record reaches disk promptly without re-opening the
+/// file per call.
+struct FileLogger {
+    file: Mutex<LineWriter<File>>,
+}
 
 impl Log for FileLogger {
     fn enabled(&self, metadata: &Metadata) -> bool {
-        metadata.level() <= Level::Debug
+        metadata.level() <= log::max_level()
     }
 
     fn log(&self, record: &Record) {
-        if self.enabled(record.metadata()) {
-            let mut file = match OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(logfile_path())
-            {
-                Ok(file) => file,
-                Err(e) => {
-                    eprintln!("Couldn't open log file: {}", e);
-                    return;
-                }
-            };
-
-            let now = Local::now();
-            let formatted_time = now.format("%Y-%m-%d %H:%M:%S");
-
-            if let Err(e) = writeln!(
-                file,
-                "{} - {} - {}",
-                formatted_time,
-                record.level(),
-                record.args()
-            ) {
-                eprintln!("Couldn't write to log file: {}", e);
-            }
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+        let formatted_time = Local::now().format("%Y-%m-%d %H:%M:%S");
+        // Recover from a poisoned lock rather than dropping logs forever.
+        let mut file = self.file.lock().unwrap_or_else(|e| e.into_inner());
+        if let Err(e) = writeln!(
+            file,
+            "{} - {} - {}",
+            formatted_time,
+            record.level(),
+            record.args()
+        ) {
+            eprintln!("Couldn't write to log file: {}", e);
         }
     }
 
     fn flush(&self) {
-        remove_file(logfile_path()).unwrap();
+        let mut file = self.file.lock().unwrap_or_else(|e| e.into_inner());
+        let _ = file.flush();
     }
 }
 
-static LOGGER: FileLogger = FileLogger;
+fn level_from_env() -> LevelFilter {
+    std::env::var(LOG_LEVEL_ENV)
+        .ok()
+        .and_then(|v| v.trim().parse::<LevelFilter>().ok())
+        .unwrap_or(LevelFilter::Info)
+}
 
 pub fn initialize_logger() -> Result<(), SetLoggerError> {
-    log::set_logger(&LOGGER).map(|()| log::set_max_level(LevelFilter::Info))
+    let file = match OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(logfile_path())
+    {
+        Ok(file) => file,
+        Err(e) => {
+            eprintln!("Couldn't open log file: {}", e);
+            return Ok(());
+        }
+    };
+    // Leaked once at startup so the logger lives for 'static.
+    let logger: &'static FileLogger = Box::leak(Box::new(FileLogger {
+        file: Mutex::new(LineWriter::new(file)),
+    }));
+    log::set_logger(logger).map(|()| log::set_max_level(level_from_env()))
 }
 
 #[tokio::main]
@@ -159,4 +175,5 @@ async fn main() {
         .serve(diff_lsp_service)
         .await;
     info!("Goodbye world.");
+    log::logger().flush();
 }
