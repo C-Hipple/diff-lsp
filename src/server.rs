@@ -4,13 +4,13 @@ use strum::IntoEnumIterator;
 
 use expanduser::expanduser;
 use log::{debug, info, trace, warn};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 
 use itertools::Itertools;
 use serde_json::Value;
-use tower_lsp::jsonrpc::{Error as LspError, ErrorCode, Result as LspResult};
+use tower_lsp::jsonrpc::{Error as LspError, Result as LspResult};
 use tower_lsp::lsp_types::notification::Notification;
 use tower_lsp::lsp_types::request::{GotoTypeDefinitionParams, GotoTypeDefinitionResponse};
 use tower_lsp::lsp_types::*;
@@ -19,7 +19,7 @@ use tower_lsp::{Client, LanguageServer};
 use anyhow::{anyhow, Result};
 
 use std::sync::{Arc, LazyLock};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
 use crate::client;
 use crate::utils::{fetch_origin_nonblocking, get_unique_elements};
@@ -50,24 +50,66 @@ impl Notification for CustomNotification {
     const METHOD: &'static str = "custom/notification";
 }
 
+pub type BackendHandle = Arc<client::ClientForBackendServer>;
+pub type BackendsMap = HashMap<SupportedFileType, BackendHandle>;
+
+/// A backend LSP that could not be started (or initialized).  diff-lsp keeps
+/// running without it; the user is told via `window/showMessage`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackendFailure {
+    pub file_type: SupportedFileType,
+    pub command: String,
+    pub reason: String,
+}
+
+impl BackendFailure {
+    pub fn user_message(&self) -> String {
+        format!(
+            "{} {}; {:?} features disabled",
+            self.command, self.reason, self.file_type
+        )
+    }
+}
+
+/// Spawns one backend process.  Does not send `initialize`.
+pub fn spawn_backend(
+    file_type: SupportedFileType,
+    dir: &str,
+    command_override: Option<(String, Option<String>)>,
+) -> std::result::Result<client::ClientForBackendServer, BackendFailure> {
+    let (command, args) = command_override.unwrap_or_else(|| get_lsp_for_file_type(file_type));
+    info!("Starting client for server: {:?} in dir {:?}", command, dir);
+    client::ClientForBackendServer::new(command.clone(), args, dir).map_err(|e| {
+        warn!("Failed to start {} for {:?}: {:?}", command, file_type, e);
+        BackendFailure {
+            file_type,
+            command,
+            reason: "not found".to_string(),
+        }
+    })
+}
+
+/// Spawns a backend for each of `active_langs`.  A backend that fails to spawn
+/// (e.g. the binary isn't installed) is skipped and returned in the failure
+/// list instead of aborting the whole server.
 pub fn create_backends_map(
     active_langs: Vec<SupportedFileType>,
     dir: &str,
-) -> Result<HashMap<SupportedFileType, Arc<client::ClientForBackendServer>>> {
-    let mut backends: HashMap<SupportedFileType, Arc<client::ClientForBackendServer>> =
-        HashMap::new();
+) -> (BackendsMap, Vec<BackendFailure>) {
+    let mut backends: BackendsMap = HashMap::new();
+    let mut failures = vec![];
 
     for supported_lang in SupportedFileType::iter() {
         if active_langs.contains(&supported_lang) {
-            let (command, args) = get_lsp_for_file_type(supported_lang);
-            info!("Starting client for server: {:?} in dir {:?}", command, dir);
-            backends.insert(
-                supported_lang,
-                Arc::new(client::ClientForBackendServer::new(command, args, dir)?),
-            );
+            match spawn_backend(supported_lang, dir, None) {
+                Ok(backend) => {
+                    backends.insert(supported_lang, Arc::new(backend));
+                }
+                Err(failure) => failures.push(failure),
+            }
         }
     }
-    Ok(backends)
+    (backends, failures)
 }
 
 static ROOT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^Root:\s+(.*)").unwrap());
@@ -133,20 +175,30 @@ pub fn read_initialization_params_from_tempfile(
 #[derive(Debug)]
 pub struct DiffLsp {
     pub client: Client,
-    pub backends: HashMap<SupportedFileType, Arc<client::ClientForBackendServer>>,
+    /// Running, initialized backends.  Clone the `Arc` out under a read lock;
+    /// don't hold the map lock across backend I/O.
+    pub backends: RwLock<BackendsMap>,
+    /// File types whose backend failed to start; not retried on every didOpen.
+    failed_backends: Mutex<HashSet<SupportedFileType>>,
+    /// Failures from before the client was ready; shown in `initialized`.
+    pending_failures: Mutex<Vec<BackendFailure>>,
+    /// Serializes lazy backend startup so a language is only spawned once.
+    startup_lock: Mutex<()>,
+    /// Test hook: spawn this command instead of the real backend for lazy startups.
+    command_override: Option<(String, Option<String>)>,
     pub diff_map: Mutex<HashMap<Url, Arc<ParsedDiff>>>,
     pub root: String, // The project root, without a trailing slash.  ~/diff-lsp for example
 }
 
 impl DiffLsp {
-    pub fn new(
-        client: Client,
-        backends: HashMap<SupportedFileType, Arc<client::ClientForBackendServer>>,
-        root: String,
-    ) -> Self {
+    pub fn new(client: Client, backends: BackendsMap, root: String) -> Self {
         let server = DiffLsp {
             client,
-            backends,
+            backends: RwLock::new(backends),
+            failed_backends: Mutex::new(HashSet::new()),
+            pending_failures: Mutex::new(vec![]),
+            startup_lock: Mutex::new(()),
+            command_override: None,
             diff_map: Mutex::new(HashMap::new()),
             root,
         };
@@ -154,8 +206,99 @@ impl DiffLsp {
         server
     }
 
-    fn get_backend(&self, source_map: &SourceMap) -> Option<&Arc<client::ClientForBackendServer>> {
-        self.backends.get(&source_map.file_type)
+    /// Records backends that failed to start before the server was created
+    /// (see [`create_backends_map`]).  They are reported to the user once the
+    /// client is initialized and are not retried.
+    pub fn with_backend_failures(self, failures: Vec<BackendFailure>) -> Self {
+        {
+            let mut failed = self.failed_backends.try_lock().unwrap();
+            failed.extend(failures.iter().map(|f| f.file_type));
+        }
+        self.pending_failures.try_lock().unwrap().extend(failures);
+        self
+    }
+
+    /// Test hook: use `command` (with optional args) for every lazily started backend.
+    pub fn with_command_override(mut self, command: String, args: Option<String>) -> Self {
+        self.command_override = Some((command, args));
+        self
+    }
+
+    /// Returns true if the backend for this file type has failed and is disabled.
+    pub async fn backend_failed(&self, file_type: SupportedFileType) -> bool {
+        self.failed_backends.lock().await.contains(&file_type)
+    }
+
+    async fn get_backend(&self, file_type: SupportedFileType) -> Option<BackendHandle> {
+        self.backends.read().await.get(&file_type).cloned()
+    }
+
+    async fn all_backends(&self) -> Vec<(SupportedFileType, BackendHandle)> {
+        self.backends
+            .read()
+            .await
+            .iter()
+            .map(|(ft, b)| (*ft, b.clone()))
+            .collect()
+    }
+
+    async fn report_failure(&self, failure: BackendFailure) {
+        warn!("Backend disabled: {}", failure.user_message());
+        self.failed_backends.lock().await.insert(failure.file_type);
+        self.client
+            .show_message(MessageType::WARNING, failure.user_message())
+            .await;
+    }
+
+    /// Returns the running backend for `file_type`, spawning and initializing
+    /// it first if needed.  Failures are remembered so a missing binary is
+    /// only attempted (and reported) once per session.
+    async fn ensure_backend(&self, file_type: SupportedFileType) -> Option<BackendHandle> {
+        if let Some(backend) = self.get_backend(file_type).await {
+            return Some(backend);
+        }
+        if self.backend_failed(file_type).await {
+            return None;
+        }
+
+        let _guard = self.startup_lock.lock().await;
+        // Re-check: another task may have started it while we waited.
+        if let Some(backend) = self.get_backend(file_type).await {
+            return Some(backend);
+        }
+        if self.backend_failed(file_type).await {
+            return None;
+        }
+
+        info!("Lazily starting backend for {:?}", file_type);
+        let backend = match spawn_backend(file_type, &self.root, self.command_override.clone()) {
+            Ok(b) => b,
+            Err(failure) => {
+                self.report_failure(failure).await;
+                return None;
+            }
+        };
+        if let Err(e) = backend.initialize().await {
+            warn!(
+                "Backend {} failed to initialize: {:?}",
+                backend.lsp_command, e
+            );
+            self.report_failure(BackendFailure {
+                file_type,
+                command: backend.lsp_command.clone(),
+                reason: "failed to initialize".to_string(),
+            })
+            .await;
+            return None;
+        }
+        backend.initialized().await;
+
+        let handle = Arc::new(backend);
+        self.backends
+            .write()
+            .await
+            .insert(file_type, handle.clone());
+        Some(handle)
     }
 
     async fn get_diff(&self, uri: &Url) -> Option<Arc<ParsedDiff>> {
@@ -214,7 +357,7 @@ impl LanguageServer for DiffLsp {
             .log_message(MessageType::WARNING, "Cruising")
             .await;
         info!("Starting initialize");
-        for backend in self.backends.values() {
+        for (file_type, backend) in self.all_backends().await {
             info!(
                 "Diff LSP doing initialize for backend: {:?}",
                 backend.lsp_command
@@ -224,6 +367,14 @@ impl LanguageServer for DiffLsp {
                     "Backend {} failed to initialize: {}",
                     backend.lsp_command, e
                 );
+                self.backends.write().await.remove(&file_type);
+                self.failed_backends.lock().await.insert(file_type);
+                // The client isn't ready for showMessage until `initialized`.
+                self.pending_failures.lock().await.push(BackendFailure {
+                    file_type,
+                    command: backend.lsp_command.clone(),
+                    reason: "failed to initialize".to_string(),
+                });
             }
         }
 
@@ -252,7 +403,14 @@ impl LanguageServer for DiffLsp {
 
     async fn initialized(&self, _: InitializedParams) {
         info!("Starting Initialized");
-        for backend in self.backends.values() {
+        let pending: Vec<BackendFailure> = self.pending_failures.lock().await.drain(..).collect();
+        for failure in pending {
+            warn!("Backend disabled: {}", failure.user_message());
+            self.client
+                .show_message(MessageType::WARNING, failure.user_message())
+                .await;
+        }
+        for (_, backend) in self.all_backends().await {
             info!(
                 "Diff LSP doing initialized for backend: {:?}",
                 backend.lsp_command
@@ -298,12 +456,13 @@ impl LanguageServer for DiffLsp {
             fetch_origin_nonblocking(&self.root);
             Ok(None)
         } else if params.command == "fetch" {
-            let mut child = fetch_origin_nonblocking(&self.root);
-            let _ = child.wait().await;
+            if let Some(mut child) = fetch_origin_nonblocking(&self.root) {
+                let _ = child.wait().await;
+            }
             Ok(None)
         } else if params.command == "check" {
             info!("Doing check!");
-            for backend in self.backends.values() {
+            for (_, backend) in self.all_backends().await {
                 backend.check_messages();
             }
             Ok(None)
@@ -315,7 +474,7 @@ impl LanguageServer for DiffLsp {
     async fn hover(&self, params: HoverParams) -> LspResult<Option<Hover>> {
         info!(
             "Doing hover: {:?}-{:?}",
-            params.text_document_position_params.position.line - 1,
+            params.text_document_position_params.position.line,
             params.text_document_position_params.position.character,
         );
         let source_map_res = self
@@ -325,8 +484,9 @@ impl LanguageServer for DiffLsp {
         let source_map = match source_map_res {
             Some(sm) => sm,
             None => {
+                // Headers, comments, blank lines etc. have nothing to hover.
                 info!("Did not find a source map for this hover!");
-                return Err(LspError::new(ErrorCode::ServerError(1)));
+                return Ok(None);
             }
         };
 
@@ -338,10 +498,12 @@ impl LanguageServer for DiffLsp {
             info!("Hover on a removed line; nothing to query");
             return Ok(None);
         }
-        let backend_mutex_res = self.get_backend(&source_map);
-        let backend_mutex = match backend_mutex_res {
+        let backend_mutex = match self.get_backend(source_map.file_type).await {
             Some(bm) => bm,
-            None => return Err(LspError::new(ErrorCode::ServerError(1))),
+            None => {
+                info!("No running backend for {:?}", source_map.file_type);
+                return Ok(None);
+            }
         };
         let backend = backend_mutex;
         // TODO do all this mapping in an async func since there's a lot of cloning and whatnot and then futures::join! it with the backend_mutex
@@ -363,7 +525,10 @@ impl LanguageServer for DiffLsp {
         // info!("Hover res: {:?}", hov_res);
         match hov_res {
             Ok(res) => Ok(res),
-            Err(_) => Err(LspError::new(ErrorCode::ServerError(1))), // Translating LspError type
+            Err(e) => {
+                warn!("Backend request failed: {:?}", e);
+                Ok(None)
+            }
         }
     }
 
@@ -377,7 +542,7 @@ impl LanguageServer for DiffLsp {
                     continue;
                 }
 
-                if let Some(backend) = self.backends.get(&filetype.unwrap()) {
+                if let Some(backend) = self.ensure_backend(filetype.unwrap()).await {
                     let mut these_params = params.clone();
                     // Here we need to break the LSP contract and use the originator's didOpen URI to read the contents of the file.
                     these_params.text_document.uri =
@@ -416,18 +581,19 @@ impl LanguageServer for DiffLsp {
 
     async fn references(&self, _params: ReferenceParams) -> LspResult<Option<Vec<Location>>> {
         let mut mapped_params = _params.clone();
-        let source_map = self
-            .get_source_map(_params.text_document_position)
-            .await
-            .ok_or(LspError::new(ErrorCode::ServerError(1)))?;
+        let Some(source_map) = self.get_source_map(_params.text_document_position).await else {
+            return Ok(None);
+        };
         if source_map.source_line_type == LineType::Removed {
             return Ok(None);
         }
 
-        let backend_mutex_res = self.get_backend(&source_map);
-        let backend_mutex = match backend_mutex_res {
+        let backend_mutex = match self.get_backend(source_map.file_type).await {
             Some(bm) => bm,
-            None => return Err(LspError::new(ErrorCode::ServerError(1))),
+            None => {
+                info!("No running backend for {:?}", source_map.file_type);
+                return Ok(None);
+            }
         };
 
         let backend = backend_mutex;
@@ -441,7 +607,10 @@ impl LanguageServer for DiffLsp {
         let references_result = backend.references(&mapped_params).await;
         match references_result {
             Ok(res) => Ok(res),
-            Err(_) => Err(LspError::new(ErrorCode::ServerError(1))), // Translating LspError type
+            Err(e) => {
+                warn!("Backend request failed: {:?}", e);
+                Ok(None)
+            }
         }
     }
 
@@ -449,19 +618,23 @@ impl LanguageServer for DiffLsp {
         &self,
         _params: GotoDefinitionParams,
     ) -> LspResult<Option<GotoDefinitionResponse>> {
-        let source_map = self
+        let Some(source_map) = self
             .get_source_map(_params.text_document_position_params.clone())
             .await
-            .ok_or(LspError::new(ErrorCode::ServerError(1)))?;
+        else {
+            return Ok(None);
+        };
         if source_map.source_line_type == LineType::Removed {
             return Ok(None);
         }
 
         let mut mapped_params = _params.clone();
-        let backend_mutex_res = self.get_backend(&source_map);
-        let backend_mutex = match backend_mutex_res {
+        let backend_mutex = match self.get_backend(source_map.file_type).await {
             Some(bm) => bm,
-            None => return Err(LspError::new(ErrorCode::ServerError(1))),
+            None => {
+                info!("No running backend for {:?}", source_map.file_type);
+                return Ok(None);
+            }
         };
 
         let backend = backend_mutex;
@@ -478,7 +651,10 @@ impl LanguageServer for DiffLsp {
         let goto_def_res = backend.goto_definition(&mapped_params).await;
         match goto_def_res {
             Ok(res) => Ok(res),
-            Err(_) => Err(LspError::new(ErrorCode::ServerError(1))), // Translating LspError type
+            Err(e) => {
+                warn!("Backend request failed: {:?}", e);
+                Ok(None)
+            }
         }
     }
 
@@ -486,19 +662,23 @@ impl LanguageServer for DiffLsp {
         &self,
         params: GotoTypeDefinitionParams,
     ) -> LspResult<Option<GotoTypeDefinitionResponse>> {
-        let source_map = self
+        let Some(source_map) = self
             .get_source_map(params.text_document_position_params.clone())
             .await
-            .ok_or(LspError::new(ErrorCode::ServerError(1)))?;
+        else {
+            return Ok(None);
+        };
         if source_map.source_line_type == LineType::Removed {
             return Ok(None);
         }
 
         let mut mapped_params = params.clone();
-        let backend_mutex_res = self.get_backend(&source_map);
-        let backend_mutex = match backend_mutex_res {
+        let backend_mutex = match self.get_backend(source_map.file_type).await {
             Some(bm) => bm,
-            None => return Err(LspError::new(ErrorCode::ServerError(1))),
+            None => {
+                info!("No running backend for {:?}", source_map.file_type);
+                return Ok(None);
+            }
         };
 
         let backend = backend_mutex;
@@ -516,7 +696,10 @@ impl LanguageServer for DiffLsp {
         let goto_type_def_res = backend.goto_type_definition(&mapped_params).await;
         match goto_type_def_res {
             Ok(res) => Ok(res),
-            Err(_) => Err(LspError::new(ErrorCode::ServerError(1))), // Translating LspError type
+            Err(e) => {
+                warn!("Backend request failed: {:?}", e);
+                Ok(None)
+            }
         }
     }
 }

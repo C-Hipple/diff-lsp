@@ -3,7 +3,20 @@
 Initialization
 --------------
 
-``diff-lsp`` initializes itself by reading the most recent file in ``/tmp`` that matches the pattern ``diff_lsp_*``. This file contains the context for the current diff session.
+``diff-lsp`` initializes itself from an initialization file that contains the context for the current diff session. It looks for one in this order:
+
+1. An explicit path passed on the command line: ``diff-lsp --init <path>``, ``--init=<path>``, or a bare positional ``diff-lsp <path>``. ``--init`` wins if both are given.
+2. The ``DIFF_LSP_INIT_FILE`` environment variable.
+3. The most recent file matching ``diff_lsp_*`` in the system temp directory (``$TMPDIR`` if set, which Emacs uses on macOS) or in ``/tmp``. If both have one, the newest wins.
+
+An explicit path is the most reliable option when several editors or sessions run at the same time.
+
+Backend LSPs
+------------
+
+``diff-lsp`` starts a backend LSP for each language found in the initialization file. A language that first shows up in a later diff gets its backend started on demand when that buffer is opened.
+
+If a backend binary is missing or fails to initialize, ``diff-lsp`` keeps running without it and sends a ``window/showMessage`` warning such as ``pylsp not found; Python features disabled``. That backend isn't retried for the rest of the session.
 
 Tempfile Format
 ~~~~~~~~~~~~~~~
