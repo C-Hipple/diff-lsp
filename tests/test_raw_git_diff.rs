@@ -23,5 +23,5 @@ fn test_parse_raw_git_diff_with_headers() {
     assert!(parsed_diff.filenames.contains(&"src/server.rs".to_string()));
 
     // Check content was actually parsed (lines map populated)
-    assert!(parsed_diff.lines_map.len() > 0);
+    assert!(!parsed_diff.lines_map.is_empty());
 }

@@ -47,7 +47,7 @@ impl SupportedFileType {
         filename
             .rsplit_once('.')
             .map(|(_name, extension)| extension.to_string())
-            .and_then(|extension| SupportedFileType::from_extension(extension))
+            .and_then(SupportedFileType::from_extension)
     }
 }
 
@@ -77,7 +77,14 @@ pub fn get_lsp_for_file_type(file_type: SupportedFileType) -> (String, Option<St
     }
 }
 
-pub fn uri_from_relative_filename(project_root: String, rel_filename: &str) -> Url {
-    // since teh diff has a relative path like /src/lib.rs and not a full path.
-    Url::from_file_path(project_root + "/" + rel_filename).unwrap()
+/// The `file://` URI of `rel_filename` (a path relative to the project root,
+/// as diffs show them).  `None` if the result isn't an absolute path (e.g. a
+/// relative root), which `Url::from_file_path` rejects.
+pub fn uri_from_relative_filename(project_root: String, rel_filename: &str) -> Option<Url> {
+    let path = project_root + "/" + rel_filename;
+    let uri = Url::from_file_path(&path).ok();
+    if uri.is_none() {
+        log::warn!("Can't build a file URI for {:?}", path);
+    }
+    uri
 }

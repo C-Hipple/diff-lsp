@@ -71,7 +71,7 @@ pub fn build_file_indexes(diff: &ParsedDiff) -> Vec<FileIndex> {
 
     for key in keys {
         let (filename, diff_line) = &diff.lines_map[&key];
-        let input_line = u32::from(key.0);
+        let input_line = key.0;
         let len = utf16_len(&diff_line.line);
         let entry = by_file
             .entry(filename.as_str())
@@ -86,7 +86,7 @@ pub fn build_file_indexes(diff: &ParsedDiff) -> Vec<FileIndex> {
         entry.last_input_line = input_line;
         entry.last_line_len = len;
 
-        let source_line = u32::from(diff_line.source_line_number.0);
+        let source_line = diff_line.source_line_number.0;
         if matches!(diff_line.line_type, LineType::Added | LineType::Unmodified) && source_line > 0
         {
             entry
@@ -416,8 +416,8 @@ modified   src/bar.rs
                 continue;
             }
             let file = files.iter().find(|f| &f.filename == filename).unwrap();
-            let backend_line = u32::from(line.source_line_number.0) - 1;
-            assert_eq!(file.visible[&backend_line].input_line, u32::from(key.0));
+            let backend_line = line.source_line_number.0 - 1;
+            assert_eq!(file.visible[&backend_line].input_line, key.0);
         }
     }
 
