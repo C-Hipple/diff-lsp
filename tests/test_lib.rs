@@ -288,3 +288,64 @@ mod tests {
         assert_eq!(parsed, Some((0, 0, 1, 1)));
     }
 }
+
+#[cfg(test)]
+mod column_and_removed_tests {
+    use diff_lsp::parsers::utils::{
+        delta_marker_width, infer_marker_width, LineType, Parsable, ParsedDiff,
+    };
+    use std::fs;
+    use tower_lsp::lsp_types::Position;
+
+    #[test]
+    fn test_delta_marker_width() {
+        // delta: "70 ⋮    │-" -> 9 code units through the bar, plus the sign column.
+        let delta = "70 ⋮    │-     let _ = initialize_logger().unwrap();";
+        assert_eq!(delta_marker_width(delta), Some(10));
+        assert_eq!(&delta.chars().skip(10).collect::<String>()[..5], "     ");
+        assert_eq!(delta_marker_width("+let x = 1;"), None);
+        assert_eq!(delta_marker_width("+ foo"), None);
+    }
+
+    #[test]
+    fn test_delta_lines_dont_skew_inferred_width() {
+        let lines = ["+ foo", "  bar", "70 ⋮    │-baz"];
+        assert_eq!(infer_marker_width(lines.into_iter()), 2);
+    }
+
+    #[test]
+    fn test_magit_removed_lines_are_flagged() {
+        let raw = fs::read_to_string("tests/data/rust_diff.magit_status").unwrap();
+        let diff = ParsedDiff::parse(&raw).unwrap();
+
+        // line 15: "-                        ..Default::default()"
+        let removed = diff.map_diff_line_to_src(15).unwrap();
+        assert_eq!(removed.source_line_type, LineType::Removed);
+
+        // line 18: "+                        references: ..."
+        let added = diff.map_diff_line_to_src(18).unwrap();
+        assert_eq!(added.source_line_type, LineType::Added);
+        // Cursor on the 'r' of "references" in the diff buffer (col 25) is col 24 in source.
+        assert_eq!(added.source_line_text.find('r').unwrap(), 25);
+        assert_eq!(added.source_position(Position::new(17, 25)).character, 24);
+    }
+
+    #[test]
+    fn test_code_review_server_removed_lines_are_flagged() {
+        let raw = fs::read_to_string("tests/data/go_diff.code_review_server").unwrap();
+        let diff = ParsedDiff::parse(&raw).unwrap();
+        // line 90: "- \tWorkflowType string" is a removed line.
+        let removed = diff.map_diff_line_to_src(90).unwrap();
+        assert_eq!(removed.source_line_type, LineType::Removed);
+        assert_eq!(removed.marker_width, 2);
+    }
+
+    #[test]
+    fn test_old_code_review_removed_lines_are_flagged() {
+        let raw = fs::read_to_string("tests/data/go_diff.code_review").unwrap();
+        let diff = ParsedDiff::parse(&raw).unwrap();
+        let removed = diff.map_diff_line_to_src(44).unwrap();
+        assert_eq!(removed.source_line_type, LineType::Removed);
+        assert_eq!(removed.marker_width, 1);
+    }
+}

@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use log::info;
 use regex::Regex;
 use std::collections::HashMap;
+use std::sync::OnceLock;
 use tower_lsp::lsp_types::Position;
 
 use strum_macros::EnumString;
@@ -102,7 +103,7 @@ impl SourceMap {
 /// separators some buffers put between hunks, not diff lines, and say nothing.
 pub fn infer_marker_width<'a>(lines: impl Iterator<Item = &'a str>) -> u32 {
     let mut saw_line = false;
-    for line in lines.filter(|l| !l.is_empty()) {
+    for line in lines.filter(|l| !l.is_empty() && delta_marker_width(l).is_none()) {
         if line.as_bytes().get(1) != Some(&b' ') {
             return 1;
         }
@@ -113,6 +114,19 @@ pub fn infer_marker_width<'a>(lines: impl Iterator<Item = &'a str>) -> u32 {
     } else {
         1
     }
+}
+
+/// The marker width of a line from a delta-washed buffer (`70 ⋮    │-foo`):
+/// everything through the `│` plus the sign column after it. Such lines carry
+/// their own prefix whatever the rest of the buffer looks like, so they're
+/// measured one by one; `None` for any other line.
+pub fn delta_marker_width(line: &str) -> Option<u32> {
+    static DELTA: OnceLock<Regex> = OnceLock::new();
+    let delta = DELTA.get_or_init(|| Regex::new(r"^[\s\d]*⋮[\s\d]*│").unwrap());
+    let m = delta.find(line)?;
+    let prefix = line[..m.end()].encode_utf16().count();
+    let sign = line[m.end()..].chars().next().map_or(0, |c| c.len_utf16());
+    Some((prefix + sign) as u32)
 }
 
 /// The various information headers at the top of diffs which say what the diff
@@ -181,7 +195,7 @@ impl ParsedDiff {
                     file_type,
                     source_line_type: diff_line.line_type,
                     source_line_text: diff_line.line.clone(),
-                    marker_width: self.marker_width,
+                    marker_width: delta_marker_width(&diff_line.line).unwrap_or(self.marker_width),
                 });
             }
         }
