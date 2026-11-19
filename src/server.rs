@@ -22,6 +22,10 @@ use std::sync::{Arc, LazyLock};
 use tokio::sync::{Mutex, RwLock};
 
 use crate::client;
+use crate::diagnostics::{
+    map_diagnostics_for_diff, publish_diagnostics_from_notification, DiagnosticsMode,
+    DiagnosticsStore,
+};
 use crate::reverse_map::{DiffLocationMapper, DiffLocationsMode, ReverseIndex};
 use crate::symbols;
 use crate::utils::{fetch_origin_nonblocking, get_unique_elements};
@@ -188,14 +192,61 @@ pub struct DiffLsp {
     startup_lock: Mutex<()>,
     /// Test hook: spawn this command instead of the real backend for lazy startups.
     command_override: Option<(String, Option<String>)>,
-    pub diff_map: Mutex<HashMap<Url, Arc<ParsedDiff>>>,
+    pub diff_map: Arc<Mutex<HashMap<Url, Arc<ParsedDiff>>>>,
     pub root: String, // The project root, without a trailing slash.  ~/diff-lsp for example
     /// How backend locations are mapped back into the diff buffer (initializationOptions.diffLocations).
     pub diff_locations_mode: std::sync::Mutex<DiffLocationsMode>,
+    /// Latest backend diagnostics per source file.
+    pub diagnostics: Arc<Mutex<DiagnosticsStore>>,
+    /// Which diff lines get diagnostics; set from `initializationOptions.diagnostics`.
+    pub diagnostics_mode: Arc<std::sync::RwLock<DiagnosticsMode>>,
+    /// Every backend forwards its notifications here (see
+    /// `ClientForBackendServer::set_notification_handler`).
+    notification_tx: tokio::sync::mpsc::UnboundedSender<Value>,
+    /// Taken in `initialized`, when the diagnostics task starts.
+    notification_rx: Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<Value>>>,
+}
+
+/// Maps the stored backend diagnostics onto each diff buffer (all of them, or
+/// just `only_uri`) and publishes them to the editor.  Empty sets are sent too,
+/// so fixed problems disappear.
+async fn publish_diff_diagnostics(
+    client: &Client,
+    diff_map: &Mutex<HashMap<Url, Arc<ParsedDiff>>>,
+    store: &Mutex<DiagnosticsStore>,
+    mode: DiagnosticsMode,
+    root: &str,
+    only_uri: Option<&Url>,
+) {
+    if mode == DiagnosticsMode::Off {
+        return;
+    }
+    let to_publish: Vec<(Url, Vec<Diagnostic>)> = {
+        let diff_map = diff_map.lock().await;
+        let store = store.lock().await;
+        diff_map
+            .iter()
+            .filter(|(uri, _)| only_uri.is_none_or(|only| only == *uri))
+            .map(|(uri, diff)| {
+                (
+                    uri.clone(),
+                    map_diagnostics_for_diff(diff, root, &store, mode),
+                )
+            })
+            .collect()
+    };
+    for (uri, diags) in to_publish {
+        info!("Publishing {} diagnostics to {}", diags.len(), uri);
+        client.publish_diagnostics(uri, diags, None).await;
+    }
 }
 
 impl DiffLsp {
     pub fn new(client: Client, backends: BackendsMap, root: String) -> Self {
+        let (notification_tx, notification_rx) = tokio::sync::mpsc::unbounded_channel();
+        for backend in backends.values() {
+            backend.set_notification_handler(notification_tx.clone());
+        }
         let server = DiffLsp {
             client,
             backends: RwLock::new(backends),
@@ -203,9 +254,13 @@ impl DiffLsp {
             pending_failures: Mutex::new(vec![]),
             startup_lock: Mutex::new(()),
             command_override: None,
-            diff_map: Mutex::new(HashMap::new()),
+            diff_map: Arc::new(Mutex::new(HashMap::new())),
             root,
             diff_locations_mode: std::sync::Mutex::new(DiffLocationsMode::default()),
+            diagnostics: Arc::new(Mutex::new(DiagnosticsStore::new())),
+            diagnostics_mode: Arc::new(std::sync::RwLock::new(DiagnosticsMode::default())),
+            notification_tx,
+            notification_rx: Mutex::new(Some(notification_rx)),
         };
         info!("Starting server: {:?}", server);
         server
@@ -283,6 +338,7 @@ impl DiffLsp {
                 return None;
             }
         };
+        backend.set_notification_handler(self.notification_tx.clone());
         if let Err(e) = backend.initialize().await {
             warn!(
                 "Backend {} failed to initialize: {:?}",
@@ -375,6 +431,54 @@ impl DiffLsp {
         Some(mapper.map_definition_response(resp, mode))
     }
 
+    fn diagnostics_mode(&self) -> DiagnosticsMode {
+        self.diagnostics_mode.read().map(|m| *m).unwrap_or_default()
+    }
+
+    /// Publishes mapped diagnostics for one diff buffer (e.g. after it is
+    /// opened or re-parsed).
+    async fn publish_diagnostics_for(&self, uri: &Url) {
+        publish_diff_diagnostics(
+            &self.client,
+            &self.diff_map,
+            &self.diagnostics,
+            self.diagnostics_mode(),
+            &self.root,
+            Some(uri),
+        )
+        .await;
+    }
+
+    /// Starts the task that stores `publishDiagnostics` from the backends and
+    /// republishes the diff buffers whenever they change.  Runs once.
+    async fn start_diagnostics_task(&self) {
+        let Some(mut rx) = self.notification_rx.lock().await.take() else {
+            return;
+        };
+        let client = self.client.clone();
+        let diff_map = self.diff_map.clone();
+        let store = self.diagnostics.clone();
+        let mode = self.diagnostics_mode.clone();
+        let root = self.root.clone();
+        tokio::spawn(async move {
+            while let Some(msg) = rx.recv().await {
+                let Some(params) = publish_diagnostics_from_notification(&msg) else {
+                    continue;
+                };
+                debug!(
+                    "Backend published {} diagnostics for {}",
+                    params.diagnostics.len(),
+                    params.uri
+                );
+                if !store.lock().await.update(params) {
+                    continue;
+                }
+                let mode = mode.read().map(|m| *m).unwrap_or_default();
+                publish_diff_diagnostics(&client, &diff_map, &store, mode, &root, None).await;
+            }
+        });
+    }
+
     async fn refresh_file(&self, uri: &Url) -> Option<Arc<ParsedDiff>> {
         let real_path = uri.path();
         debug!("Calling refresh_file for the real path: {:?}", real_path);
@@ -404,6 +508,12 @@ impl LanguageServer for DiffLsp {
             DiffLocationsMode::from_initialization_options(params.initialization_options.as_ref());
         info!("diffLocations mode: {:?}", mode);
         *self.diff_locations_mode.lock().unwrap() = mode;
+        let diagnostics_mode =
+            DiagnosticsMode::from_initialization_options(params.initialization_options.as_ref());
+        info!("Diagnostics mode: {:?}", diagnostics_mode);
+        if let Ok(mut m) = self.diagnostics_mode.write() {
+            *m = diagnostics_mode;
+        }
         self.client
             .log_message(MessageType::WARNING, "Cruising")
             .await;
@@ -454,6 +564,7 @@ impl LanguageServer for DiffLsp {
 
     async fn initialized(&self, _: InitializedParams) {
         info!("Starting Initialized");
+        self.start_diagnostics_task().await;
         let pending: Vec<BackendFailure> = self.pending_failures.lock().await.drain(..).collect();
         for failure in pending {
             warn!("Backend disabled: {}", failure.user_message());
@@ -502,6 +613,7 @@ impl LanguageServer for DiffLsp {
             for key in keys {
                 info!("Starting refresh of {:?}", key);
                 self.refresh_file(&key).await;
+                self.publish_diagnostics_for(&key).await;
                 info!("Finished refresh of {:?}", key);
             }
             fetch_origin_nonblocking(&self.root);
@@ -618,6 +730,8 @@ impl LanguageServer for DiffLsp {
                 }
             }
         }
+        self.publish_diagnostics_for(&params.text_document.uri)
+            .await;
         info!("Finished did_open");
     }
 

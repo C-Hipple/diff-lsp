@@ -13,6 +13,7 @@ Allows your editor to use the following lsp capabilities in diffs
 - Find References
 - Jump to type definition
 - Document symbols (imenu, breadcrumb / headerline)
+- Diagnostics: errors/warnings from your backend LSPs shown on the diff lines (see below).
 
 ![Finding references in code review](docs/source/images/diff-lsp-references.png)
 
@@ -34,6 +35,24 @@ diff-lsp.el can manage diff-lsp for the following modes:
 * magit status 
 * [code-review-server emacs client](https://www.github.com/C-Hipple/code-review-server)
 * [code-review](https://www.github.com/C-Hipple/code-review)
+
+## Diagnostics
+
+diff-lsp collects the `textDocument/publishDiagnostics` notifications sent by the backend LSPs for the files in your diff and re-publishes them on the matching lines of the diff buffer, so lsp-mode/flycheck (or any LSP client) shows them right in magit-status or your code review.
+
+By default only diagnostics that start on an **added (`+`) line** are shown: the new problems introduced by the change. Configure this with `initializationOptions`:
+
+```jsonc
+{"diagnostics": "added"}    // default: only added lines
+{"diagnostics": "visible"}  // added and unmodified context lines
+{"diagnostics": "off"}      // never publish diagnostics to diff buffers
+```
+
+In Emacs with lsp-mode, for example: `(lsp-register-client (make-lsp-client ... :initialization-options '(:diagnostics "visible")))`.
+
+Each message is prefixed with the source file and line (`config.go:22: ...`) since a diff buffer covers many files. Ranges are shifted past the diff marker and multi-line ranges are cut off at the end of the diff line.
+
+Diagnostics are delivered as the backends publish them (e.g. right after rust-analyzer finishes `cargo check`), and re-sent when a diff buffer is opened or refreshed.
 
 ## Diff locations (staying in the review)
 

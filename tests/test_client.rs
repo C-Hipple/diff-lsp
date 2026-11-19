@@ -102,3 +102,54 @@ async fn test_answers_to_other_requests_are_skipped() {
     assert!(err.to_string().contains("-32601"), "{}", err);
     server.await.unwrap();
 }
+
+// publishDiagnostics arriving while a request is in flight is handed to the
+// notification hook (which the server uses for diagnostics), and the answer is
+// still the one returned for the request.
+#[tokio::test]
+async fn test_notification_hook_receives_diagnostics_before_answer() {
+    use diff_lsp::diagnostics::publish_diagnostics_from_notification;
+    use tower_lsp::lsp_types::Url;
+
+    let (client, mut backend) = connect();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    client.set_notification_handler(tx);
+    let server = tokio::spawn(async move {
+        let req = backend.recv().await;
+        backend
+            .send(&[
+                json!({"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {
+                    "uri": "file:///proj/src/lib.rs",
+                    "diagnostics": [{
+                        "range": {"start": {"line": 6, "character": 8}, "end": {"line": 6, "character": 9}},
+                        "severity": 2,
+                        "message": "unused variable: `x`"
+                    }]
+                }}),
+                json!({"jsonrpc": "2.0", "method": "window/logMessage", "params": {"type": 3, "message": "hi"}}),
+                json!({"jsonrpc": "2.0", "id": req["id"], "result": {"contents": "fn foo()"}}),
+            ])
+            .await;
+    });
+    let answer = client
+        .request("textDocument/hover", json!({}))
+        .await
+        .unwrap();
+    assert_eq!(answer["contents"], "fn foo()");
+    server.await.unwrap();
+
+    let captured: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok())
+        .filter_map(|msg| publish_diagnostics_from_notification(&msg))
+        .collect();
+    assert_eq!(
+        captured.len(),
+        1,
+        "only the diagnostics notification is captured"
+    );
+    assert_eq!(
+        captured[0].uri,
+        Url::parse("file:///proj/src/lib.rs").unwrap()
+    );
+    assert_eq!(captured[0].diagnostics[0].message, "unused variable: `x`");
+    assert_eq!(captured[0].diagnostics[0].range.start.line, 6);
+}

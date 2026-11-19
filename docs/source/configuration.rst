@@ -28,6 +28,21 @@ The initialization tempfile supports the following fields:
 * ``modified <file>``, ``new file <file>``, ``deleted <file>``: Used to detect which languages should be activated based on file extensions.
 * ``diff --git ...``: Standard git diff headers are also parsed to detect active languages.
 
+Initialization Options
+----------------------
+
+``diff-lsp`` reads the following keys from the LSP ``initializationOptions`` sent by your editor:
+
+* ``diagnostics``: which diff lines receive backend diagnostics.
+
+  * ``"added"`` (default): only added (``+``) lines, i.e. new problems introduced by the change.
+  * ``"visible"``: added and unmodified context lines.
+  * ``"off"``: never publish diagnostics to diff buffers.
+
+.. code-block:: json
+
+   {"diagnostics": "visible"}
+
 Worktree Integration
 --------------------
 

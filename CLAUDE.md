@@ -25,6 +25,7 @@ diff-lsp is a **middleware LSP server** written in Rust. It sits between a text 
 - **`src/server.rs`** — Main LSP server (`DiffLsp` struct) implementing `tower_lsp::LanguageServer`. Handles LSP requests, maintains diff maps and backend connections, translates diff positions to source file positions.
 - **`src/client.rs`** — `ClientForBackendServer` spawns and manages child LSP processes, communicating via JSON-RPC over stdin/stdout.
 - **`src/parsers/`** — Diff format parsers behind the `Parsable` trait. Implementations: `MagitDiff` (magit-status buffers), `CodeReviewDiff` (code-review formats). Produces `ParsedDiff` with line-number mappings.
+- **`src/diagnostics.rs`** — Pure mapping of backend `publishDiagnostics` onto diff-buffer lines (`DiagnosticsStore`, `ReverseIndex`, `map_diagnostics_for_diff`, `DiagnosticsMode` from `initializationOptions.diagnostics`).
 - **`src/lib.rs`** — `SupportedFileType` enum (Rust/Go/Python/TypeScript), file-type-to-LSP-command mapping.
 - **`src/main.rs`** — Entry point. Reads init params from `/tmp/diff_lsp_*` tempfile, detects languages, spawns backend LSPs, starts the server.
 
@@ -40,7 +41,7 @@ The editor writes a tempfile at `/tmp/diff_lsp_*` containing `Root:`, optional `
 
 ## Tests
 
-Tests live in `tests/` with fixture data in `tests/data/`. Test files: `test_lib.rs` (parsing, line mapping), `test_server.rs` (init params, worktree), `test_code_review_server.rs` (code-review format), `test_raw_git_diff.rs` (git diff format).
+Tests live in `tests/` with fixture data in `tests/data/`. Test files: `test_lib.rs` (parsing, line mapping), `test_server.rs` (init params, worktree), `test_code_review_server.rs` (code-review format), `test_raw_git_diff.rs` (git diff format), `test_diagnostics.rs` (diagnostics mapping), `test_client.rs` (backend response reading, diagnostics capture), `test_positions.rs` (column mapping).
 
 ## Logging
 
