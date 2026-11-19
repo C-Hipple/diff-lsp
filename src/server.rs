@@ -3,7 +3,7 @@ use std::fs::read_to_string;
 use strum::IntoEnumIterator;
 
 use expanduser::expanduser;
-use log::info;
+use log::{info, warn};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -53,8 +53,8 @@ impl Notification for CustomNotification {
 pub fn create_backends_map(
     active_langs: Vec<SupportedFileType>,
     dir: &str,
-) -> Result<HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>>> {
-    let mut backends: HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>> =
+) -> Result<HashMap<SupportedFileType, Arc<client::ClientForBackendServer>>> {
+    let mut backends: HashMap<SupportedFileType, Arc<client::ClientForBackendServer>> =
         HashMap::new();
 
     for supported_lang in SupportedFileType::iter() {
@@ -63,9 +63,7 @@ pub fn create_backends_map(
             info!("Starting client for server: {:?} in dir {:?}", command, dir);
             backends.insert(
                 supported_lang,
-                Arc::new(Mutex::new(client::ClientForBackendServer::new(
-                    command, args, dir,
-                )?)),
+                Arc::new(client::ClientForBackendServer::new(command, args, dir)?),
             );
         }
     }
@@ -100,7 +98,6 @@ pub fn read_initialization_params_from_tempfile(
                 }
             }
             if let Some(caps) = file_regex.captures(line) {
-                println!("caps: {:?}", caps.len());
                 let filename = caps.get(2).unwrap().as_str().to_string();
                 if let Some(file_type) = SupportedFileType::from_filename(filename) {
                     file_types.push(file_type);
@@ -133,7 +130,7 @@ pub fn read_initialization_params_from_tempfile(
 #[derive(Debug)]
 pub struct DiffLsp {
     pub client: Client,
-    pub backends: HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>>,
+    pub backends: HashMap<SupportedFileType, Arc<client::ClientForBackendServer>>,
     pub diff_map: Mutex<HashMap<Url, ParsedDiff>>,
     pub root: String, // The project root, without a trailing slash.  ~/diff-lsp for example
 }
@@ -141,7 +138,7 @@ pub struct DiffLsp {
 impl DiffLsp {
     pub fn new(
         client: Client,
-        backends: HashMap<SupportedFileType, Arc<Mutex<client::ClientForBackendServer>>>,
+        backends: HashMap<SupportedFileType, Arc<client::ClientForBackendServer>>,
         root: String,
     ) -> Self {
         let server = DiffLsp {
@@ -157,10 +154,7 @@ impl DiffLsp {
         server
     }
 
-    fn get_backend(
-        &self,
-        source_map: &SourceMap,
-    ) -> Option<&Arc<Mutex<client::ClientForBackendServer>>> {
+    fn get_backend(&self, source_map: &SourceMap) -> Option<&Arc<client::ClientForBackendServer>> {
         self.backends.get(&source_map.file_type)
     }
 
@@ -217,13 +211,17 @@ impl LanguageServer for DiffLsp {
             .log_message(MessageType::WARNING, "Cruising")
             .await;
         info!("Starting initialize");
-        for backend_mutex in self.backends.values().into_iter() {
-            let mut backend = backend_mutex.lock().await;
+        for backend in self.backends.values() {
             info!(
                 "Diff LSP doing initialize for backend: {:?}",
                 backend.lsp_command
             );
-            backend.initialize().unwrap();
+            if let Err(e) = backend.initialize().await {
+                warn!(
+                    "Backend {} failed to initialize: {}",
+                    backend.lsp_command, e
+                );
+            }
         }
 
         let res = Ok(InitializeResult {
@@ -251,13 +249,12 @@ impl LanguageServer for DiffLsp {
 
     async fn initialized(&self, _: InitializedParams) {
         info!("Starting Initialized");
-        for backend_mutex in self.backends.values().into_iter() {
-            let mut backend = backend_mutex.lock().await;
+        for backend in self.backends.values() {
             info!(
                 "Diff LSP doing initialized for backend: {:?}",
                 backend.lsp_command
             );
-            backend.initialized();
+            backend.initialized().await;
         }
         info!("Finished all initialized");
     }
@@ -303,8 +300,7 @@ impl LanguageServer for DiffLsp {
             Ok(None)
         } else if params.command == "check" {
             info!("Doing check!");
-            for backend_mutex in self.backends.values().into_iter() {
-                let mut backend = backend_mutex.lock().await;
+            for backend in self.backends.values() {
                 backend.check_messages();
             }
             Ok(None)
@@ -335,12 +331,16 @@ impl LanguageServer for DiffLsp {
             "source map: {:?} - {:?}",
             source_map.source_line, source_map.source_line_text
         );
+        if source_map.source_line_type == LineType::Removed {
+            info!("Hover on a removed line; nothing to query");
+            return Ok(None);
+        }
         let backend_mutex_res = self.get_backend(&source_map);
         let backend_mutex = match backend_mutex_res {
             Some(bm) => bm,
             None => return Err(LspError::new(ErrorCode::ServerError(1))),
         };
-        let mut backend = backend_mutex.lock().await;
+        let backend = backend_mutex;
         // TODO do all this mapping in an async func since there's a lot of cloning and whatnot and then futures::join! it with the backend_mutex
         let mut mapped_params = params.clone();
         let uri = uri_from_relative_filename(self.root.clone(), &source_map.file_name);
@@ -356,7 +356,7 @@ impl LanguageServer for DiffLsp {
             source_map.source_position(params.text_document_position_params.position);
 
         // info!("Hover mapped params: {:?}", mapped_params);
-        let hov_res = backend.hover(mapped_params);
+        let hov_res = backend.hover(mapped_params).await;
         // info!("Hover res: {:?}", hov_res);
         match hov_res {
             Ok(res) => Ok(res),
@@ -374,8 +374,7 @@ impl LanguageServer for DiffLsp {
                     continue;
                 }
 
-                if let Some(backend_mutex) = self.backends.get(&filetype.unwrap()) {
-                    let mut backend = backend_mutex.lock().await;
+                if let Some(backend) = self.backends.get(&filetype.unwrap()) {
                     let mut these_params = params.clone();
                     // Here we need to break the LSP contract and use the originator's didOpen URI to read the contents of the file.
                     these_params.text_document.uri =
@@ -391,7 +390,7 @@ impl LanguageServer for DiffLsp {
                     match text_result {
                         Ok(text) => {
                             these_params.text_document.text = text;
-                            backend.did_open(&these_params);
+                            backend.did_open(&these_params).await;
                         }
                         Err(_) => {
                             info!("Skipping opening file {:?}", full_path);
@@ -418,6 +417,9 @@ impl LanguageServer for DiffLsp {
             .get_source_map(_params.text_document_position)
             .await
             .ok_or(LspError::new(ErrorCode::ServerError(1)))?;
+        if source_map.source_line_type == LineType::Removed {
+            return Ok(None);
+        }
 
         let backend_mutex_res = self.get_backend(&source_map);
         let backend_mutex = match backend_mutex_res {
@@ -425,7 +427,7 @@ impl LanguageServer for DiffLsp {
             None => return Err(LspError::new(ErrorCode::ServerError(1))),
         };
 
-        let mut backend = backend_mutex.lock().await;
+        let backend = backend_mutex;
 
         let uri = uri_from_relative_filename(self.root.clone(), &source_map.file_name);
         mapped_params.text_document_position.text_document.uri = uri;
@@ -433,7 +435,7 @@ impl LanguageServer for DiffLsp {
         mapped_params.text_document_position.position =
             source_map.source_position(mapped_params.text_document_position.position);
 
-        let references_result = backend.references(&mapped_params);
+        let references_result = backend.references(&mapped_params).await;
         match references_result {
             Ok(res) => Ok(res),
             Err(_) => Err(LspError::new(ErrorCode::ServerError(1))), // Translating LspError type
@@ -448,6 +450,9 @@ impl LanguageServer for DiffLsp {
             .get_source_map(_params.text_document_position_params.clone())
             .await
             .ok_or(LspError::new(ErrorCode::ServerError(1)))?;
+        if source_map.source_line_type == LineType::Removed {
+            return Ok(None);
+        }
 
         let mut mapped_params = _params.clone();
         let backend_mutex_res = self.get_backend(&source_map);
@@ -456,7 +461,7 @@ impl LanguageServer for DiffLsp {
             None => return Err(LspError::new(ErrorCode::ServerError(1))),
         };
 
-        let mut backend = backend_mutex.lock().await;
+        let backend = backend_mutex;
 
         let uri = uri_from_relative_filename(self.root.clone(), &source_map.file_name);
 
@@ -467,7 +472,7 @@ impl LanguageServer for DiffLsp {
         // same as for hover
         mapped_params.text_document_position_params.position =
             source_map.source_position(_params.text_document_position_params.position);
-        let goto_def_res = backend.goto_definition(&mapped_params);
+        let goto_def_res = backend.goto_definition(&mapped_params).await;
         match goto_def_res {
             Ok(res) => Ok(res),
             Err(_) => Err(LspError::new(ErrorCode::ServerError(1))), // Translating LspError type
@@ -482,6 +487,9 @@ impl LanguageServer for DiffLsp {
             .get_source_map(params.text_document_position_params.clone())
             .await
             .ok_or(LspError::new(ErrorCode::ServerError(1)))?;
+        if source_map.source_line_type == LineType::Removed {
+            return Ok(None);
+        }
 
         let mut mapped_params = params.clone();
         let backend_mutex_res = self.get_backend(&source_map);
@@ -490,7 +498,7 @@ impl LanguageServer for DiffLsp {
             None => return Err(LspError::new(ErrorCode::ServerError(1))),
         };
 
-        let mut backend = backend_mutex.lock().await;
+        let backend = backend_mutex;
 
         let uri = uri_from_relative_filename(self.root.clone(), &source_map.file_name);
 
@@ -502,7 +510,7 @@ impl LanguageServer for DiffLsp {
         mapped_params.text_document_position_params.position =
             source_map.source_position(params.text_document_position_params.position);
 
-        let goto_type_def_res = backend.goto_type_definition(&mapped_params);
+        let goto_type_def_res = backend.goto_type_definition(&mapped_params).await;
         match goto_type_def_res {
             Ok(res) => Ok(res),
             Err(_) => Err(LspError::new(ErrorCode::ServerError(1))), // Translating LspError type
