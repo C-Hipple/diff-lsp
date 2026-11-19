@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use log::info;
 use regex::Regex;
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{LazyLock, OnceLock};
 use tower_lsp::lsp_types::Position;
 
 use strum_macros::EnumString;
@@ -49,10 +49,16 @@ pub struct DiffLine {
     pub source_line_number: SourceLineNumber,
 }
 
+/// Matches `Key: value` header lines at the top of a diff buffer.
+pub static HEADER_LINE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(\w+):\s+(.+)").unwrap());
+
+// Complex regex to support when the code is added at the start of a file, and we don't have all 4 values
+static HUNK_HEADER_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"@@ -(\d+)(,(\d+))? \+(\d+)(,(\d+))? @@").unwrap());
+
 pub fn parse_header(header: &str) -> Option<(u16, u16, u16, u16)> {
-    // Complex regex to support when the code is added at the start of a file, and we don't have all 4 values
-    let re = Regex::new(r"@@ -(\d+)(,(\d+))? \+(\d+)(,(\d+))? @@").unwrap();
-    if let Some(caps) = re.captures(header) {
+    if let Some(caps) = HUNK_HEADER_RE.captures(header) {
         let old_start = caps[1].parse::<u16>().unwrap();
         let old_lines = caps
             .get(3)
@@ -190,7 +196,7 @@ impl ParsedDiff {
         if let Some((filename, diff_line)) = self.lines_map.get(&InputLineNumber::new(line_num)) {
             if let Some(file_type) = SupportedFileType::from_filename(filename.to_string()) {
                 return Some(SourceMap {
-                    file_name: filename.clone(),
+                    file_name: filename.to_owned(),
                     source_line: diff_line.source_line_number,
                     file_type,
                     source_line_type: diff_line.line_type,

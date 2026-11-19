@@ -3,7 +3,7 @@ use std::fs::read_to_string;
 use strum::IntoEnumIterator;
 
 use expanduser::expanduser;
-use log::{info, warn};
+use log::{debug, info, trace, warn};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -18,7 +18,7 @@ use tower_lsp::{Client, LanguageServer};
 
 use anyhow::{anyhow, Result};
 
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use tokio::sync::Mutex;
 
 use crate::client;
@@ -70,6 +70,12 @@ pub fn create_backends_map(
     Ok(backends)
 }
 
+static ROOT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^Root:\s+(.*)").unwrap());
+static WORKTREE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^Worktree:\s+(.*)").unwrap());
+static FILE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(modified|new file|deleted)\s+(.*)").unwrap());
+static DIFF_GIT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^diff --git\s+(.*)").unwrap());
+
 pub fn read_initialization_params_from_tempfile(
     file_path: &PathBuf,
 ) -> Result<(String, Option<String>, Vec<SupportedFileType>)> {
@@ -79,17 +85,13 @@ pub fn read_initialization_params_from_tempfile(
         let mut file_types: Vec<SupportedFileType> = vec![];
         // Values may be padded with extra whitespace (the emacs client
         // tab-aligns header values), so match any run of whitespace and trim.
-        let root_regex = Regex::new(r"^Root:\s+(.*)").unwrap();
-        let worktree_regex = Regex::new(r"^Worktree:\s+(.*)").unwrap();
-        let file_regex = Regex::new(r"^(modified|new file|deleted)\s+(.*)").unwrap();
-        let diff_git_regex = Regex::new(r"^diff --git\s+(.*)").unwrap();
 
         for line in input.lines() {
-            if let Some(caps) = root_regex.captures(line) {
+            if let Some(caps) = ROOT_RE.captures(line) {
                 cwd = caps.get(1).unwrap().as_str().trim().to_string();
                 // break;
             }
-            if let Some(caps) = worktree_regex.captures(line) {
+            if let Some(caps) = WORKTREE_RE.captures(line) {
                 let value = caps.get(1).unwrap().as_str().trim();
                 // Clients may emit the header with no value (or a serialized
                 // JS null) when no worktree exists for the review.
@@ -97,12 +99,13 @@ pub fn read_initialization_params_from_tempfile(
                     worktree = Some(value.to_string());
                 }
             }
-            if let Some(caps) = file_regex.captures(line) {
+            if let Some(caps) = FILE_RE.captures(line) {
+                trace!("caps: {:?}", caps.len());
                 let filename = caps.get(2).unwrap().as_str().to_string();
                 if let Some(file_type) = SupportedFileType::from_filename(filename) {
                     file_types.push(file_type);
                 }
-            } else if let Some(caps) = diff_git_regex.captures(line) {
+            } else if let Some(caps) = DIFF_GIT_RE.captures(line) {
                 // Handle diff --git a/foo.rs b/foo.rs
                 // We want the last one, and strip b/
                 let files_part = caps.get(1).unwrap().as_str();
@@ -131,7 +134,7 @@ pub fn read_initialization_params_from_tempfile(
 pub struct DiffLsp {
     pub client: Client,
     pub backends: HashMap<SupportedFileType, Arc<client::ClientForBackendServer>>,
-    pub diff_map: Mutex<HashMap<Url, ParsedDiff>>,
+    pub diff_map: Mutex<HashMap<Url, Arc<ParsedDiff>>>,
     pub root: String, // The project root, without a trailing slash.  ~/diff-lsp for example
 }
 
@@ -144,10 +147,7 @@ impl DiffLsp {
         let server = DiffLsp {
             client,
             backends,
-            diff_map: Mutex::new((|| {
-                let map: HashMap<Url, ParsedDiff> = HashMap::new();
-                map
-            })()),
+            diff_map: Mutex::new(HashMap::new()),
             root,
         };
         info!("Starting server: {:?}", server);
@@ -158,7 +158,7 @@ impl DiffLsp {
         self.backends.get(&source_map.file_type)
     }
 
-    async fn get_diff(&self, uri: &Url) -> Option<ParsedDiff> {
+    async fn get_diff(&self, uri: &Url) -> Option<Arc<ParsedDiff>> {
         let map = self.diff_map.lock().await;
         map.get(&uri).cloned()
     }
@@ -173,30 +173,33 @@ impl DiffLsp {
     async fn line_to_source_map(&self, uri: Url, line_num: u16) -> Option<SourceMap> {
         if let Some(diff) = self.get_diff(&uri).await {
             // info!("Found the diff at URI: {:?}", uri.clone());
-            info!("Used diff line count {:?}", diff.lines_map.len());
-            info!("Used diff line parsed at {:?}", diff.parsed_at);
-            info!("Used source with total lines: {:?}", diff.total_lines);
+            debug!(
+                "Using diff with {} mapped lines, {} total lines, parsed at {:?}",
+                diff.lines_map.len(),
+                diff.total_lines,
+                diff.parsed_at
+            );
             return diff.map_diff_line_to_src(line_num);
         }
-        info!("Failed to find diff at URI: {:?}", uri.clone());
+        info!("Failed to find diff at URI: {:?}", uri);
         None
     }
 
-    async fn refresh_file(&self, uri: &Url) -> Option<ParsedDiff> {
+    async fn refresh_file(&self, uri: &Url) -> Option<Arc<ParsedDiff>> {
         let real_path = uri.path();
-        info!("Calling refresh_file for the real path: {:?}", real_path);
+        debug!("Calling refresh_file for the real path: {:?}", real_path);
 
         let contents = fs::read_to_string(real_path).unwrap();
         if let Some(diff) = ParsedDiff::parse(&contents) {
-            info!("Inserting diff! 2");
+            let diff = Arc::new(diff);
             let mut diff_map = self.diff_map.lock().await;
 
-            if let Some(diff_before) = diff_map.get(&uri) {
-                info!("Diff before len: {:?}", diff_before.lines_map.len());
+            if let Some(diff_before) = diff_map.get(uri) {
+                debug!("Diff before len: {:?}", diff_before.lines_map.len());
             }
-            info!("Diff new len: {:?}", diff.lines_map.len());
+            debug!("Diff new len: {:?}", diff.lines_map.len());
 
-            diff_map.insert(uri.clone(), diff.clone()); // Use the *same* lock to insert
+            diff_map.insert(uri.clone(), Arc::clone(&diff)); // Use the *same* lock to insert
             Some(diff)
         } else {
             None
