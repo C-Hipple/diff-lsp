@@ -8,6 +8,7 @@ pub mod client;
 pub mod parsers;
 pub mod reverse_map;
 pub mod server;
+pub mod symbols;
 pub mod utils;
 
 #[derive(Debug, Hash, PartialEq, std::cmp::Eq, Copy, Clone, EnumIter)]

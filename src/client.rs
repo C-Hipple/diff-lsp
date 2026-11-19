@@ -276,6 +276,10 @@ impl ClientForBackendServer {
                 text_document: Some(TextDocumentClientCapabilities {
                     hover: Some(HoverClientCapabilities::default()),
                     references: None,
+                    document_symbol: Some(DocumentSymbolClientCapabilities {
+                        hierarchical_document_symbol_support: Some(true),
+                        ..Default::default()
+                    }),
                     ..Default::default()
                 }),
                 window: None,
@@ -414,6 +418,15 @@ impl ClientForBackendServer {
     pub async fn references(&self, params: &ReferenceParams) -> Result<Option<Vec<Location>>> {
         debug!("Doing references with the params: {:?}", params);
         self.typed_request("textDocument/references", params).await
+    }
+
+    pub async fn document_symbol(
+        &self,
+        params: &DocumentSymbolParams,
+    ) -> Result<Option<DocumentSymbolResponse>> {
+        debug!("Doing document symbol with the params: {:?}", params);
+        self.typed_request("textDocument/documentSymbol", params)
+            .await
     }
 
     /// Messages are now read continuously by the reader task; this just reports state.
