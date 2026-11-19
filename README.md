@@ -35,9 +35,21 @@ diff-lsp.el can manage diff-lsp for the following modes:
 * [code-review-server emacs client](https://www.github.com/C-Hipple/code-review-server)
 * [code-review](https://www.github.com/C-Hipple/code-review)
 
-## Limitations
+## Backend startup
 
-Right now I have a limitation where you can't add more clients for backend servers in a single sesion with the LSP, and you have to restart it.  Normally this is not a problem and is trivial to do.  The reason is because of the types with the backends hashmap being not mutable I'd need to put the whole hashmap behind a mutex which gets me into a ton of rust typing headaches.
+Backend LSPs are started for the languages found in the initialization file. If a later diff contains a new language, its backend is started on demand when the buffer is opened; no restart needed.
+
+If a backend binary is missing (e.g. `pylsp` isn't installed) or fails to initialize, diff-lsp keeps running without it and shows a warning such as `pylsp not found; Python features disabled`. It doesn't retry that backend for the rest of the session.
+
+Hover, definition, type definition and references return an empty result (not an error) on lines that don't map to source, like headers, comments and blank lines.
+
+## Initialization file
+
+diff-lsp reads its context (`Root:`, optional `Worktree:`, and the diff) from an initialization file. It looks for one in this order:
+
+1. A path on the command line: `diff-lsp --init <path>`, `--init=<path>`, or a bare `diff-lsp <path>` (`--init` wins if both are given)
+2. The `DIFF_LSP_INIT_FILE` environment variable
+3. The newest `diff_lsp_*` file in the system temp dir (`$TMPDIR`, as used by Emacs on macOS) or `/tmp`
 
 ## Worktree Integration
 

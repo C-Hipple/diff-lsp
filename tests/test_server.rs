@@ -130,8 +130,8 @@ mod tests {
             Some(&"diff-lsp".to_string())
         );
 
-        let backends = create_backends_map(vec![SupportedFileType::Rust], &root)
-            .expect("failed to create backends");
+        let (backends, failures) = create_backends_map(vec![SupportedFileType::Rust], &root);
+        assert!(failures.is_empty(), "failed to create backends");
         let (service, _socket) =
             // TODO: This no longer sets the diff to RAW_MAGIT_DIFF_RUST
             LspService::new(|client| DiffLsp::new(client, backends, root));
@@ -175,8 +175,8 @@ mod tests {
             diff.headers.get(&DiffHeader::Buffer),
             Some(&"lsp-example".to_string())
         );
-        let backends = create_backends_map(vec![SupportedFileType::Go], &root)
-            .expect("failed to create backends");
+        let (backends, failures) = create_backends_map(vec![SupportedFileType::Go], &root);
+        assert!(failures.is_empty(), "failed to create backends");
         let (service, _socket) =
             // TODO: This no longer sets the diff to raw go diff
             LspService::new(|client| DiffLsp::new(client, backends, root));

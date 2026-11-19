@@ -9,7 +9,10 @@ use log::{info, LevelFilter, Log, Metadata, Record, SetLoggerError};
 use tower_lsp::{LspService, Server};
 
 use diff_lsp::server::{create_backends_map, read_initialization_params_from_tempfile, DiffLsp};
-use diff_lsp::utils::{fetch_origin_nonblocking, get_most_recent_file};
+use diff_lsp::utils::{
+    fetch_origin_nonblocking, get_most_recent_file_in_dirs, init_file_scan_dirs, init_file_source,
+    InitFileSource, INIT_FILE_ENV_VAR, INIT_FILE_PREFIX,
+};
 
 const LOG_FILE_PATH: &str = "~/.diff-lsp.log";
 /// Set to e.g. `debug` or `trace` to raise verbosity (default: `info`).
@@ -89,29 +92,35 @@ async fn main() {
     }
     let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
 
-    // An explicit tempfile path may be passed as the first argument so a
-    // client can pin the init params it just wrote instead of racing other
-    // sessions for the most recently modified /tmp/diff_lsp_* file.
-    let tempfile_path = match std::env::args().nth(1) {
-        Some(arg) => {
-            let path = PathBuf::from(&arg);
+    // Init file: `--init <path>` or a bare positional path (both let a client
+    // pin the init params it just wrote instead of racing other sessions for
+    // the newest tempfile), then $DIFF_LSP_INIT_FILE, then the newest
+    // diff_lsp_* file in the temp dir(s).
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let tempfile_path = match init_file_source(&args, std::env::var(INIT_FILE_ENV_VAR).ok()) {
+        InitFileSource::Arg(path) | InitFileSource::Env(path) => {
             if !path.is_file() {
+                info!("Initialization tempfile {:?} does not exist", path);
                 eprintln!("Initialization tempfile {:?} does not exist", path);
                 return;
             }
+            info!("Using explicit init file {:?}", path);
             path
         }
-        None => match get_most_recent_file("/tmp", "diff_lsp_") {
-            Ok(Some(path)) => path,
-            Ok(None) => {
-                eprintln!("No initialization tempfile found in /tmp/diff_lsp_*");
-                return;
+        InitFileSource::Scan => {
+            let dirs = init_file_scan_dirs();
+            match get_most_recent_file_in_dirs(&dirs, INIT_FILE_PREFIX) {
+                Some(path) => path,
+                None => {
+                    info!("No initialization tempfile found in {:?}", dirs);
+                    eprintln!(
+                        "No initialization tempfile {}* found in {:?}; pass --init <path> or set {}",
+                        INIT_FILE_PREFIX, dirs, INIT_FILE_ENV_VAR
+                    );
+                    return;
+                }
             }
-            Err(e) => {
-                eprintln!("Error searching for tempfile: {}", e);
-                return;
-            }
-        },
+        }
     };
 
     info!("Looking at tempfile: {:?}", tempfile_path);
@@ -126,8 +135,8 @@ async fn main() {
         }
     };
 
-    info!("hurr");
-    fetch_origin_nonblocking(&cwd);
+    // Best effort; failures are logged inside.
+    let _ = fetch_origin_nonblocking(&cwd);
 
     let mut backend_root = cwd.clone();
     if let Some(wt) = worktree {
@@ -154,20 +163,12 @@ async fn main() {
     }
 
     info!("Starting to create backends");
-    let backends = match create_backends_map(langs, &backend_root) {
-        Ok(b) => b,
-        Err(e) => {
-            info!("Errored on starting backends map: {:?}", e);
-            eprintln!(
-                "Failed to create backends for directory {}: {}",
-                backend_root, e
-            );
-            return;
-        }
-    };
+    // Only what the init file needs; other languages start lazily on didOpen.
+    let (backends, failures) = create_backends_map(langs, &backend_root);
     info!("Done create backends");
-    let (diff_lsp_service, socket) =
-        LspService::new(|client| DiffLsp::new(client, backends, backend_root.to_string()));
+    let (diff_lsp_service, socket) = LspService::new(|client| {
+        DiffLsp::new(client, backends, backend_root.to_string()).with_backend_failures(failures)
+    });
 
     info!("Starting server@{:?}", backend_root);
 

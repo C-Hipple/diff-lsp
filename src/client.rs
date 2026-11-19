@@ -256,6 +256,16 @@ impl ClientForBackendServer {
             .as_ref()
             .and_then(|p| p.clone().into_os_string().into_string().ok());
         let root_uri = self.path.as_ref().and_then(|p| Url::from_file_path(p).ok());
+        let workspace_folders = match (&root_uri, &self.path) {
+            (Some(uri), Some(path)) => Some(vec![WorkspaceFolder {
+                uri: uri.clone(),
+                name: path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.to_string_lossy().into_owned()),
+            }]),
+            _ => None,
+        };
         let params = InitializeParams {
             process_id: Some(std::process::id()),
             root_path,
@@ -273,7 +283,7 @@ impl ClientForBackendServer {
                 experimental: None,
             },
             trace: None,
-            workspace_folders: None,
+            workspace_folders,
             client_info: Some(ClientInfo {
                 name: "diff-lsp-client".to_string(),
                 version: Some("0.0.1".to_string()),
