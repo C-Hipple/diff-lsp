@@ -2,9 +2,9 @@
 //!
 //! Both magit-status buffers and code-review buffers have the same overall
 //! shape: a block of `Key: value` headers, followed by file sections, each made
-//! of `@@ ... @@` hunks.  The formats differ only in whether review comment
-//! blocks can be interleaved with diff lines, so each parser supplies a
-//! [`DiffFlavor`] describing that and calls [`walk_hunks`].
+//! of `@@ ... @@` hunks.  The formats differ only in whether blocks of review
+//! comments and plugin annotations can be interleaved with diff lines, so each
+//! parser supplies a [`DiffFlavor`] describing that and calls [`walk_hunks`].
 
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -15,8 +15,9 @@ use crate::parsers::utils::*;
 
 /// Describes the format-specific parts of a diff buffer.
 pub(crate) struct DiffFlavor {
-    /// Whether review comment blocks (old `Reviewed by`/`Comment by` ...
-    /// `-------`, and new `┌─ REVIEW COMMENT` ... `└`) are skipped.
+    /// Whether review comment and plugin annotation blocks (the code-review
+    /// package's `Reviewed by`/`Comment by` ... `-------`, and
+    /// code-review-server's `┌─ ` ... `└`) are skipped.
     pub review_comments: bool,
 }
 
@@ -50,16 +51,36 @@ pub(crate) fn file_header_filename(line: &str) -> Option<&str> {
     }
 }
 
+/// Whether `line` opens a block of review comments or plugin annotations.
+///
+/// The code-review package opens one with `Reviewed by` or `Comment by`.
+/// code-review-server draws a box under the line it's about, its first line
+/// `┌─ ` and a title, every line after it `├─`/`│`, until `└`:
+///
+/// ```text
+///     ┌─ bob · 2 days ago              a comment thread
+///     │ Should this back off?
+///     ├─ you · pending
+///     │ Let's cap the total wait at a minute.
+///     └─
+///     ┌─ warning · Security Check      plugin annotations
+///     │ this line looks wrong
+///     └─
+/// ```
+///
+/// Before C-Hipple/code-review-server#343 the title named the kind of block
+/// instead: `┌─ REVIEW COMMENT ───`, `┌─ FILE COMMENT ───` or
+/// `┌─ PLUGIN ANNOTATION ───`.  The space after `┌─` keeps a diagram's top
+/// edge (`┌──────┐`) in the source from reading as a block.
 fn is_review_comment_start(line: &str) -> bool {
-    // Old format (code-review) or new box-drawing format (code-review-server),
-    // which starts with "    ┌─ REVIEW COMMENT ─────"
     line.starts_with("Reviewed by")
         || line.starts_with("Comment by")
-        || line.trim_start().starts_with("┌─ REVIEW COMMENT")
+        || line.trim_start().starts_with("┌─ ")
 }
 
 fn is_review_comment_end(line: &str) -> bool {
-    // Old format ends with a dashed line, new format with "    └─────────"
+    // The code-review package ends a block with a dashed line,
+    // code-review-server with "    └─" (before #343, "    └─────────").
     line.starts_with("-------") || line.trim_start().starts_with("└")
 }
 
